@@ -40,7 +40,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds:  ${{ secrets.AZURE_CREDENTIALS_HML }}
+          creds:  ${{ secrets.AZURE_CREDENTIALS_HML2 }}
 
       - name: Load values from App Configuration
         run: |
@@ -91,7 +91,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds:  ${{ secrets.AZURE_CREDENTIALS_HML }}
+          creds:  ${{ secrets.AZURE_CREDENTIALS_HML2 }}
 
       - name: Load all values from App Configuration
         run: |
@@ -770,7 +770,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds:  ${{ secrets.AZURE_CREDENTIALS_HML }}
+          creds:  ${{ secrets.AZURE_CREDENTIALS_HML2 }}
 
       - name: Load values from App Configuration
         run: |
