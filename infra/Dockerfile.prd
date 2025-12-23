@@ -1,0 +1,78 @@
+# Base python image
+FROM python:3.11-alpine AS python-base
+
+ARG ENV="PRODUCTION"
+ENV ENV=${ENV}
+
+ARG TOKEN_PKG_LIB_GITHUB=""
+ENV TOKEN_PKG_LIB_GITHUB=${TOKEN_PKG_LIB_GITHUB}
+
+# Stage for Poetry installation
+FROM python-base AS poetry-base
+
+# https://python-poetry.org/docs#ci-recommendations
+ARG POETRY_VERSION=1.8.2
+ENV POETRY_VERSION=${POETRY_VERSION} \
+    POETRY_HOME=/opt/poetry \
+    POETRY_VENV=/opt/poetry-venv \
+    POETRY_CACHE_DIR=/opt/.cache \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Installing Poetry and dependencies
+RUN python3 -m venv $POETRY_VENV \
+    && $POETRY_VENV/bin/pip install -U pip setuptools \
+    && $POETRY_VENV/bin/pip install poetry==${POETRY_VERSION}
+
+RUN apk add --no-cache curl git gcc musl libffi build-base jq bash
+
+# Add Poetry to PATH
+ENV PATH=$POETRY_VENV/bin:$PATH
+
+# Add arcs-lib-pca, 
+# Caso de algum erro para clonar o arcs-lib-pca, 
+# certifique-se que o TOKEN_PKG_LIB_GITHUB no Environment da oganization teltec-arcs no github, não expirou.
+# Caso tenha expirado gere um novo e atualize no Environment
+WORKDIR /arcs-lib-pca
+RUN git clone https://${TOKEN_PKG_LIB_GITHUB}@github.com/teltec-arcs/arcs-lib-pca.git . \
+	&& git checkout main \
+	&& poetry build
+
+WORKDIR /app
+
+# Copy project files
+COPY ./alembic ./alembic
+COPY ./infra/arcs.sh ./infra/arcs.sh
+RUN chmod +x ./infra/arcs.sh
+COPY ./src ./src
+COPY ./__init__.py ./
+COPY ./alembic.ini ./
+#o arquivo .env é criado durante o build no github actions
+COPY ./.env ./.env
+COPY ./main.py ./
+COPY ./pyproject.toml ./
+COPY ./README.md ./
+
+# Install dependencies for hml environment
+RUN poetry install --with prod --without dev --no-interaction
+
+# Validate the project setup
+RUN poetry check \
+    && poetry completions bash >> ~/.bash_completion \
+    && poetry --version \
+    # Clear cache to reduce image size
+    && poetry cache clear --all pypi
+
+# Add security certificates
+RUN apk add --no-cache ca-certificates
+# Create a non-root user and set permissions for /app
+RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
+
+# Switch to the non-root user
+USER appuser
+
+# Expose port 8000
+EXPOSE 8000
+
+# Set the entrypoint
+ENTRYPOINT ["poetry", "run", "gunicorn", "-w", "4", "--bind", "0.0.0.0:8000", "main:wsgi_app"]
