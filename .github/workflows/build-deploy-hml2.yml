@@ -999,6 +999,30 @@ jobs:
             
             echo "✅ Ingress alterado para internal (privado)"
             echo "   O Container App agora só é acessível via VNet/APIM"
+            
+            # Aguardar alguns segundos para o FQDN interno ser atualizado
+            echo "⏳ Aguardando FQDN interno ser atualizado..."
+            sleep 15
+            
+            # Obter o novo FQDN interno após alterar o ingress
+            echo "📡 Obtendo novo FQDN interno..."
+            INTERNAL_FQDN=$(az containerapp show \
+              --name ${{ env.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+              --query "properties.configuration.ingress.fqdn" -o tsv)
+            
+            if [ -n "$INTERNAL_FQDN" ]; then
+              echo "✅ FQDN interno obtido: $INTERNAL_FQDN"
+              echo "microservice_fqdn=$INTERNAL_FQDN" >> $GITHUB_ENV
+              echo "microservice_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+              echo "MICROSERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+              echo "ARCS_SERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+              echo "arcs_service_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+              echo ""
+              echo "✅ URLs atualizadas para usar FQDN interno (privado)"
+            else
+              echo "⚠️  Não foi possível obter FQDN interno. Mantendo FQDN anterior."
+            fi
           else
             echo "⚠️  CAE não tem VNet Integration. Mantendo ingress como external."
             echo "   Para tornar privado, configure VNet Integration no CAE primeiro."
