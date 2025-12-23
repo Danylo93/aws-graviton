@@ -31,10 +31,10 @@ ENV PATH=$POETRY_VENV/bin:$PATH
 
 # Add arcs-lib-pca, 
 # Caso de algum erro para clonar o arcs-lib-pca, 
-# certifique-se que o TOKEN_PKG_LIB_GITHUB no Environment da oganization teltec-arcs no github, não expirou.
+# certifique-se que o TOKEN_PKG_LIB_GITHUB no Environment da oganization Danylo93 no github, não expirou.
 # Caso tenha expirado gere um novo e atualize no Environment
 WORKDIR /arcs-lib-pca
-RUN git clone https://${TOKEN_PKG_LIB_GITHUB}@github.com/teltec-arcs/arcs-lib-pca.git . \
+RUN git clone https://${TOKEN_PKG_LIB_GITHUB}@github.com/Danylo93/arcs-lib-pca.git . \
     && git checkout hml2 \
     && poetry build
 
