@@ -35,7 +35,7 @@ ENV PATH=$POETRY_VENV/bin:$PATH
 # Caso tenha expirado gere um novo e atualize no Environment
 WORKDIR /arcs-lib-pca
 RUN git clone https://${TOKEN_PKG_LIB_GITHUB}@github.com/Danylo93/arcs-lib-pca.git . \
-    && git checkout hml2 \
+    && git checkout main \
     && poetry build
 
 WORKDIR /app
