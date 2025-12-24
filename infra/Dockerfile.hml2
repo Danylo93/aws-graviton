@@ -68,6 +68,20 @@ RUN apk add --no-cache ca-certificates
 # Create /app/keys directory (required by arcs_lib_pca)
 RUN mkdir -p /app/keys
 
+# Create startup script to write priv-arcs.pem from secret
+RUN echo '#!/bin/sh' > /app/start.sh && \
+    echo 'set -e' >> /app/start.sh && \
+    echo 'mkdir -p /app/keys' >> /app/start.sh && \
+    echo 'if [ -n "$PRIV_ARCS_PEM" ]; then' >> /app/start.sh && \
+    echo '  echo "$PRIV_ARCS_PEM" > /app/keys/priv-arcs.pem' >> /app/start.sh && \
+    echo '  chmod 600 /app/keys/priv-arcs.pem' >> /app/start.sh && \
+    echo '  echo "✅ priv-arcs.pem criado a partir do secret"' >> /app/start.sh && \
+    echo 'else' >> /app/start.sh && \
+    echo '  echo "⚠️  PRIV_ARCS_PEM não está definido"' >> /app/start.sh && \
+    echo 'fi' >> /app/start.sh && \
+    echo 'exec poetry run gunicorn -w 4 --bind 0.0.0.0:8000 main:wsgi_app' >> /app/start.sh && \
+    chmod +x /app/start.sh
+
 # Create a non-root user and set permissions for /app
 RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
 
@@ -78,4 +92,4 @@ USER appuser
 EXPOSE 8000
 
 # Set the entrypoint
-ENTRYPOINT ["poetry", "run", "gunicorn", "-w", "4", "--bind", "0.0.0.0:8000", "main:wsgi_app"]
+ENTRYPOINT ["/app/start.sh"]
