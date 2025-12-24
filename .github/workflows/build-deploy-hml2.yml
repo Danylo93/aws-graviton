@@ -391,16 +391,25 @@ jobs:
           PROTOCOLS="${{ vars.APIM_API_PROTOCOLS }}"
           [ -z "$PROTOCOLS" ] && PROTOCOLS="https"
           
+          DISPLAY_NAME="${{ vars.APIM_API_NAME_FRIENDLY }}"
+          [ -z "$DISPLAY_NAME" ] && DISPLAY_NAME="$API_ID"
+          
+          API_PATH="${{ vars.APIM_API_ROUTE_PATH }}"
+          [ -z "$API_PATH" ] && API_PATH="/$(echo $API_ID | tr '[:upper:]' '[:lower:]')"
+          
+          API_DESCRIPTION="${{ vars.APIM_API_DESCRIPTION }}"
+          [ -z "$API_DESCRIPTION" ] && API_DESCRIPTION="API for $API_ID"
+          
           if az apim api show --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --service-name ${{ env.APIM_NAME_HML2 }} --api-id "$API_ID" --output none 2>/dev/null; then
             az apim api update --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --service-name ${{ env.APIM_NAME_HML2 }} \
-              --api-id "$API_ID" --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
-              --path "${{ vars.APIM_API_ROUTE_PATH }}" --service-url "$BACKEND_URL" \
-              --protocols "$PROTOCOLS" --description "${{ vars.APIM_API_DESCRIPTION }}"
+              --api-id "$API_ID" --display-name "$DISPLAY_NAME" \
+              --path "$API_PATH" --service-url "$BACKEND_URL" \
+              --protocols "$PROTOCOLS" --description "$API_DESCRIPTION"
           else
             az apim api create --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --service-name ${{ env.APIM_NAME_HML2 }} \
-              --api-id "$API_ID" --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
-              --path "${{ vars.APIM_API_ROUTE_PATH }}" --service-url "$BACKEND_URL" \
-              --protocols "$PROTOCOLS" --description "${{ vars.APIM_API_DESCRIPTION }}"
+              --api-id "$API_ID" --display-name "$DISPLAY_NAME" \
+              --path "$API_PATH" --service-url "$BACKEND_URL" \
+              --protocols "$PROTOCOLS" --description "$API_DESCRIPTION"
           fi
 
       - name: Import OpenAPI specification
@@ -410,8 +419,18 @@ jobs:
             exit 0
           fi
           
+          API_ID="${{ env.CONTAINER_APP_NAME }}"
+          DISPLAY_NAME="${{ vars.APIM_API_NAME_FRIENDLY }}"
+          [ -z "$DISPLAY_NAME" ] && DISPLAY_NAME="$API_ID"
+          
+          API_PATH="${{ vars.APIM_API_ROUTE_PATH }}"
+          [ -z "$API_PATH" ] && API_PATH="/$(echo $API_ID | tr '[:upper:]' '[:lower:]')"
+          
+          API_DESCRIPTION="${{ vars.APIM_API_DESCRIPTION }}"
+          [ -z "$API_DESCRIPTION" ] && API_DESCRIPTION="API for $API_ID"
+          
           az apim api import --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --service-name ${{ env.APIM_NAME_HML2 }} \
-            --api-id ${{ env.CONTAINER_APP_NAME }} --path "${{ vars.APIM_API_ROUTE_PATH }}" \
-            --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" --description "${{ vars.APIM_API_DESCRIPTION }}" \
+            --api-id "$API_ID" --path "$API_PATH" \
+            --display-name "$DISPLAY_NAME" --description "$API_DESCRIPTION" \
             --service-url "${{ env.microservice_url }}" --specification-path ${{ github.workspace }}/infra/openapi.yml \
             --specification-format OpenApi --protocols https
