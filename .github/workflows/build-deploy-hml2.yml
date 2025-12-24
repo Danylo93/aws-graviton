@@ -9,17 +9,15 @@ on:
       - '**'
       - '.github/workflows/build-deploy-hml2.yml'
   workflow_dispatch:
-
   repository_dispatch:
     types: [deploy-hml2]
+
 env:
   AZURE_PATH_PROVIDERS: /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ secrets.RG_NAME_ARCS_HML2 }}/providers
-  CONTAINER_APP_NAME: "${{ github.event.repository.name }}-hml2"  # Nome do repositório sem 'owner/'
+  CONTAINER_APP_NAME: "${{ github.event.repository.name }}-hml2"
   CONTAINER_APP_SOURCE_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ secrets.RG_NAME_ARCS_HML2 }}/providers/Microsoft.App/containerApps/${{ github.event.repository.name }}-hml2"
   CONTAINER_PORT: 8000
   # URLs provisórias para o .env (serão atualizadas dinamicamente quando o FQDN for obtido)
-  # Nota: Essas URLs são placeholders usados no .env durante o build
-  # Os valores reais serão obtidos dinamicamente no step "Get Container App FQDN"
   MICROSERVICE_INTERNAL_URL: https://${{ github.event.repository.name }}-hml2.placeholder.eastus2.azurecontainerapps.io
   ARCS_SERVICE_INTERNAL_URL: https://arcs-service-hml2.ashyground-8b528dd4.eastus2.azurecontainerapps.io
   MICROSERVICE_EXTERNAL_URL: https://arcs-apim-hml2.azure-api.net${{vars.APIM_API_ROUTE_PATH}}
@@ -30,32 +28,38 @@ jobs:
     runs-on: ubuntu-latest
     environment: HML2
     permissions: 
-      id-token: write #This is required for requesting the OIDC JWT Token
-      contents: read #Required when GH token is used to authenticate with private repo
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout to the branch
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds:  ${{ secrets.AZURE_CREDENTIALS_HML2 }}
+          creds: ${{ secrets.AZURE_CREDENTIALS_HML2 }}
 
       - name: Load values from App Configuration
+        id: load_config
         run: |
           APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
           
-          # Carregar valores do App Config (com label backend primeiro, depois sem label)
-          ACR_NAME_HML2=$(az appconfig kv show --name "$APP_CONFIG_NAME" --key "ACR_NAME_HML2" --label "backend" --query "value" -o tsv 2>/dev/null || az appconfig kv show --name "$APP_CONFIG_NAME" --key "ACR_NAME_HML2" --query "value" -o tsv 2>/dev/null || echo "${{ secrets.ACR_NAME_HML2 }}")
-          AZURE_SUBSCRIPTION_ID=$(az appconfig kv show --name "$APP_CONFIG_NAME" --key "AZURE_SUBSCRIPTION_ID_HML2" --label "backend" --query "value" -o tsv 2>/dev/null || az appconfig kv show --name "$APP_CONFIG_NAME" --key "AZURE_SUBSCRIPTION_ID_HML2" --query "value" -o tsv 2>/dev/null || echo "${{ secrets.AZURE_SUBSCRIPTION_ID }}")
-          RG_NAME_ARCS_HML2=$(az appconfig kv show --name "$APP_CONFIG_NAME" --key "RG_NAME_ARCS_HML2" --label "backend" --query "value" -o tsv 2>/dev/null || az appconfig kv show --name "$APP_CONFIG_NAME" --key "RG_NAME_ARCS_HML2" --query "value" -o tsv 2>/dev/null || echo "${{ secrets.RG_NAME_ARCS_HML2 }}")
+          get_config_value() {
+            local key=$1
+            local secret_fallback=$2
+            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" --query "value" -o tsv 2>/dev/null || \
+            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --query "value" -o tsv 2>/dev/null || \
+            echo "$secret_fallback"
+          }
+          
+          ACR_NAME_HML2=$(get_config_value "ACR_NAME_HML2" "${{ secrets.ACR_NAME_HML2 }}")
+          AZURE_SUBSCRIPTION_ID=$(get_config_value "AZURE_SUBSCRIPTION_ID_HML2" "${{ secrets.AZURE_SUBSCRIPTION_ID }}")
+          RG_NAME_ARCS_HML2=$(get_config_value "RG_NAME_ARCS_HML2" "${{ secrets.RG_NAME_ARCS_HML2 }}")
           
           echo "ACR_NAME_HML2=$ACR_NAME_HML2" >> $GITHUB_ENV
           echo "AZURE_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID" >> $GITHUB_ENV
           echo "RG_NAME_ARCS_HML2=$RG_NAME_ARCS_HML2" >> $GITHUB_ENV
-          
-          # Atualizar AZURE_PATH_PROVIDERS e CONTAINER_APP_SOURCE_ID
           echo "AZURE_PATH_PROVIDERS=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers" >> $GITHUB_ENV
           echo "CONTAINER_APP_SOURCE_ID=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers/Microsoft.App/containerApps/${{ github.event.repository.name }}-hml2" >> $GITHUB_ENV
 
@@ -83,6 +87,7 @@ jobs:
             -t ${{ env.ACR_NAME_HML2 }}.azurecr.io/${{ github.event.repository.name }}:${{ github.sha }} \
             -f ./infra/Dockerfile.hml2 .
           docker push ${{ env.ACR_NAME_HML2 }}.azurecr.io/${{ github.event.repository.name }}:${{ github.sha }}
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -91,14 +96,14 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds:  ${{ secrets.AZURE_CREDENTIALS_HML2 }}
+          creds: ${{ secrets.AZURE_CREDENTIALS_HML2 }}
 
       - name: Load all values from App Configuration
+        id: load_all_config
         run: |
           APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
           MS_NAME="${{ github.event.repository.name }}"
           
-          # Função para obter valor do App Config (com fallback para secrets)
           get_config_value() {
             local key=$1
             local secret_fallback=$2
@@ -145,8 +150,6 @@ jobs:
           echo "AZURE_MANAGED_IDENTITY_NAME_HML2=$AZURE_MANAGED_IDENTITY_NAME_HML2" >> $GITHUB_ENV
           echo "AZURE_CLIENT_ID_HML=$AZURE_CLIENT_ID_HML" >> $GITHUB_ENV
           echo "AZURE_CLIENT_SECRET_HML=$AZURE_CLIENT_SECRET_HML" >> $GITHUB_ENV
-          
-          # Atualizar AZURE_PATH_PROVIDERS e CONTAINER_APP_SOURCE_ID
           echo "AZURE_PATH_PROVIDERS=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers" >> $GITHUB_ENV
           echo "CONTAINER_APP_SOURCE_ID=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers/Microsoft.App/containerApps/${{ github.event.repository.name }}-hml2" >> $GITHUB_ENV
           
@@ -158,63 +161,52 @@ jobs:
           az account set -s ${{ env.AZURE_SUBSCRIPTION_ID }}
           az configure --defaults group=${{ env.RG_NAME_ARCS_HML2 }}
           az extension add --name containerapp --upgrade
-          # Não usar serviceconnector-passwordless para evitar conflitos com --active-directory-auth
-          # az extension add --name serviceconnector-passwordless --upgrade
-      - name: Check if ${{ env.CONTAINER_APP_NAME }} exists in Azure container apps
+
+      - name: Verify prerequisites
         run: |
-          if az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'properties.provisioningState' -o tsv; then
-            echo "Container App ${{ env.CONTAINER_APP_NAME }}: exists."
+          echo "=========================================="
+          echo "🔍 VERIFYING PREREQUISITES"
+          echo "=========================================="
+          
+          # Verificar Container App
+          if az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'properties.provisioningState' -o tsv 2>/dev/null; then
+            echo "✅ Container App exists"
             echo "aca_exists=true" >> $GITHUB_ENV
           else
-            echo "Container App ${{ env.CONTAINER_APP_NAME }}: does not exist."
+            echo "ℹ️  Container App does not exist (will be created)"
             echo "aca_exists=false" >> $GITHUB_ENV
           fi
-      - name: Check if Redis Cache exists
-        run: |
+          
+          # Verificar Redis
           if az redis show --name redis-arcs-porschecup-hml2 --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'provisioningState' -o tsv 2>/dev/null; then
-            echo "SUCCESS: Azure Cache for Redis 'redis-arcs-porschecup-hml2' exists."
+            echo "✅ Redis Cache exists"
             echo "redis_exists=true" >> $GITHUB_ENV
           else
-            echo "ERROR: Azure Cache for Redis 'redis-arcs-porschecup-hml2' does not exist."
+            echo "❌ ERROR: Redis Cache does not exist"
             echo "redis_exists=false" >> $GITHUB_ENV
             exit 1
           fi
-      - name: Verify Managed Identity exists
-        run: |
+          
+          # Verificar Managed Identity
           IDENTITY_NAME="${{ env.AZURE_MANAGED_IDENTITY_NAME_HML2 }}"
-          IDENTITY_RESOURCE_ID="${{ env.AZURE_PATH_PROVIDERS }}/Microsoft.ManagedIdentity/userAssignedIdentities/$IDENTITY_NAME"
-          
-          echo "=========================================="
-          echo "🔍 VERIFYING MANAGED IDENTITY"
-          echo "=========================================="
-          echo "Identity Name (from secret): $IDENTITY_NAME"
-          echo "Full Resource ID: $IDENTITY_RESOURCE_ID"
-          echo "Resource Group: ${{ secrets.RG_NAME_ARCS_HML2 }}"
-          echo "=========================================="
-          
-          if az identity show --name "$IDENTITY_NAME" --resource-group ${{ secrets.RG_NAME_ARCS_HML2 }} --query 'name' -o tsv 2>/dev/null; then
-            echo "SUCCESS: Managed Identity '$IDENTITY_NAME' exists."
+          if az identity show --name "$IDENTITY_NAME" --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'name' -o tsv 2>/dev/null; then
+            echo "✅ Managed Identity exists: $IDENTITY_NAME"
             echo "identity_exists=true" >> $GITHUB_ENV
           else
-            echo "ERROR: Managed Identity '$IDENTITY_NAME' NOT FOUND in resource group '${{ env.RG_NAME_ARCS_HML2 }}'!"
-            echo ""
-            echo "Available identities in resource group:"
+            echo "❌ ERROR: Managed Identity '$IDENTITY_NAME' NOT FOUND"
             az identity list --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "[].name" -o table || echo "Could not list identities"
-            echo ""
-            echo "Please verify the secret 'AZURE_MANAGED_IDENTITY_NAME_HML2' is set correctly."
-            echo "Expected value for HML2: 'id-arcs-porschecup-hm12' (note: 'hm12' not 'hml2')"
+            echo "identity_exists=false" >> $GITHUB_ENV
             exit 1
           fi
+          
+          echo "=========================================="
+
       - name: Create Container App
         if: env.aca_exists == 'false'
         run: |
-          # Criar Container App com ingress external temporariamente
-          # Será alterado para internal após post_boot e register_microservice
           echo "=========================================="
-          echo "Criando Container App com ingress EXTERNAL (temporário)"
+          echo "🚀 Creating Container App (temporary external ingress)"
           echo "=========================================="
-          echo "⚠️  O ingress será alterado para INTERNAL após post_boot"
-          echo ""
           
           az containerapp create \
             --name ${{ env.CONTAINER_APP_NAME }} \
@@ -230,26 +222,29 @@ jobs:
             --min-replicas 1 \
             --env-vars "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380" "MICROSERVICE_PORT=8000"
           
-          echo "✅ Container App criado com ingress external (temporário)"
+          echo "✅ Container App created"
           echo "ingress_was_internal=false" >> $GITHUB_ENV
       
       - name: Update Container App
         if: env.aca_exists == 'true'
         run: |
-          # Garantir que ingress está external temporariamente para permitir post_boot e register_microservice
+          echo "=========================================="
+          echo "🔄 Updating Container App"
+          echo "=========================================="
+          
+          # Garantir ingress external temporariamente
           CURRENT_INGRESS=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.configuration.ingress.external" -o tsv 2>/dev/null || echo "false")
           
           if [ "$CURRENT_INGRESS" != "true" ]; then
-            echo "⚠️  Ingress não está external. Configurando temporariamente como external..."
+            echo "⚠️  Setting ingress to external (temporary)..."
             az containerapp ingress enable \
               --name ${{ env.CONTAINER_APP_NAME }} \
               --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
               --type external \
               --target-port ${{ env.CONTAINER_PORT }}
-            echo "✅ Ingress configurado como external temporariamente"
             echo "ingress_was_internal=true" >> $GITHUB_ENV
           else
-            echo "✅ Ingress já está external"
+            echo "✅ Ingress already external"
             echo "ingress_was_internal=false" >> $GITHUB_ENV
           fi
           
@@ -258,505 +253,155 @@ jobs:
             --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --image ${{ env.ACR_NAME_HML2 }}.azurecr.io/${{ github.event.repository.name }}:${{ github.sha }} \
             --min-replicas 1 \
-            --workload-profile-name simulate_prod \
+            --workload-profile-name hm12 \
             --set-env-vars "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380"
-  
+          
+          echo "✅ Container App updated"
+
       - name: Assign managed identity to Container App
         run: |
           az containerapp identity assign \
             --name ${{ env.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --user-assigned ${{ env.AZURE_PATH_PROVIDERS }}/Microsoft.ManagedIdentity/userAssignedIdentities/${{ env.AZURE_MANAGED_IDENTITY_NAME_HML2 }}
-      - name: Validate if Container App is running
+
+      - name: Validate Container App status
         run: |
+          echo "=========================================="
+          echo "⏳ Validating Container App status"
+          echo "=========================================="
+          
+          MAX_ATTEMPTS=10
+          SLEEP_INTERVAL=15
           ATTEMPTS=0
-          MAX_ATTEMPTS=3
-          SLEEP_INTERVAL=30
       
-          while [[ $ATTEMPTS -lt $MAX_ATTEMPTS ]]; do
-            CONTAINER_APP_STATUS=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'properties.provisioningState' -o tsv)
+          while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+            STATUS=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'properties.provisioningState' -o tsv 2>/dev/null || echo "Unknown")
       
-            if [[ "$CONTAINER_APP_STATUS" == "Succeeded" ]]; then
-              echo "Container App is running successfully."
+            if [ "$STATUS" == "Succeeded" ]; then
+              echo "✅ Container App is running (Status: $STATUS)"
               break
-            elif [[ "$CONTAINER_APP_STATUS" == "InProgress" ]]; then
+            elif [ "$STATUS" == "InProgress" ]; then
               ATTEMPTS=$((ATTEMPTS+1))
-              echo "Attempt $ATTEMPTS/$MAX_ATTEMPTS: Container App is still in progress. Waiting $SLEEP_INTERVAL seconds before retrying..."
+              echo "⏳ Attempt $ATTEMPTS/$MAX_ATTEMPTS: Status is $STATUS. Waiting ${SLEEP_INTERVAL}s..."
               sleep $SLEEP_INTERVAL
             else
-              echo "Container App is not running correctly. Current status: $CONTAINER_APP_STATUS"
-              echo "Fetching logs for Container App..."
+              echo "❌ Container App status: $STATUS"
+              echo "Fetching logs..."
               az containerapp logs show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --tail 100
-              exit 1  # Fail the job if the container app is not running correctly
+              exit 1
             fi
           done
       
-          if [[ "$CONTAINER_APP_STATUS" != "Succeeded" ]]; then
-            echo "Container App failed to reach 'Succeeded' status after $MAX_ATTEMPTS attempts."
-            exit 1  # Fail the job if the container app never reaches 'Succeeded'
+          if [ "$STATUS" != "Succeeded" ]; then
+            echo "❌ Container App failed to reach 'Succeeded' status after $MAX_ATTEMPTS attempts"
+            exit 1
           fi
 
-      - name: Create or update connection to storage-blob
+      - name: Setup managed connections
         run: |
           set +e
-          # Construir variáveis necessárias
-          SUB_ID="${AZURE_SUBSCRIPTION_ID:-${{ secrets.AZURE_SUBSCRIPTION_ID }}}"
-          RG_NAME="${RG_NAME_ARCS_HML2:-${{ secrets.RG_NAME_ARCS_HML2 }}}"
-          CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
-          STORAGE_NAME="${STORAGE_NAME_HML2:-${{ secrets.STORAGE_NAME_HML2 }}}"
-          
-          # Construir IDs corretamente
-          CONTAINER_APP_SOURCE_ID="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.App/containerApps/${CONTAINER_APP_NAME}"
-          STORAGE_TARGET_HML2="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/${STORAGE_NAME}/blobServices/default"
-          
-          echo "Criando conexão com Storage do HML2 usando Managed Identity..."
-          echo "  Source ID: $CONTAINER_APP_SOURCE_ID"
-          echo "  Target ID: $STORAGE_TARGET_HML2"
-          
-          # Verificar se conexão já existe - se existir, não fazer nada
-          if az containerapp connection show \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$RG_NAME" \
-            --connection arcsstorage \
-            --output none 2>/dev/null; then
-            echo "✅ Conexão Storage já existe. Pulando criação."
-            exit 0
-          fi
-          
-          # Criar conexão se não existir
-          echo "Conexão Storage não existe, criando..."
-          ERROR_OUTPUT=$(az containerapp connection create storage-blob \
-            --target-id "$STORAGE_TARGET_HML2" \
-            --source-id "$CONTAINER_APP_SOURCE_ID" \
-            --container "$CONTAINER_APP_NAME" \
-            --connection arcsstorage \
-            --client-type python 2>&1)
-          CREATE_EXIT=$?
-          
-          if [ $CREATE_EXIT -ne 0 ]; then
-            echo "❌ ERRO ao criar conexão Storage:"
-            echo "$ERROR_OUTPUT"
-            exit 1
-          else
-            echo "✅ Storage blob connection created"
-          fi
-          set -e
-      
-      - name: Create or update connection to keyvault
-        run: |
-          set +e
-          # Construir variáveis necessárias
-          SUB_ID="${AZURE_SUBSCRIPTION_ID:-${{ secrets.AZURE_SUBSCRIPTION_ID }}}"
-          RG_NAME="${RG_NAME_ARCS_HML2:-${{ secrets.RG_NAME_ARCS_HML2 }}}"
-          CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
-          KV_NAME="${ARCS_KV_NAME_HML2:-${{ secrets.ARCS_KV_NAME_HML2 }}}"
-          
-          # Construir IDs corretamente
-          CONTAINER_APP_SOURCE_ID="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.App/containerApps/${CONTAINER_APP_NAME}"
-          KV_TARGET_HML2="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.KeyVault/vaults/${KV_NAME}"
-          
-          echo "Criando ou atualizando conexão com Key Vault do HML2 usando Managed Identity..."
-          echo "  Source ID: $CONTAINER_APP_SOURCE_ID"
-          echo "  Target ID: $KV_TARGET_HML2"
-          
-          # Verificar se conexão já existe - se existir, não fazer nada
-          if az containerapp connection show \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$RG_NAME" \
-            --connection arcs_kv \
-            --output none 2>/dev/null; then
-            echo "✅ Conexão Key Vault já existe. Pulando criação."
-            exit 0
-          fi
-          
-          # Criar conexão se não existir
-          echo "Conexão Key Vault não existe, criando..."
-          ERROR_OUTPUT=$(az containerapp connection create keyvault \
-            --target-id "$KV_TARGET_HML2" \
-            --source-id "$CONTAINER_APP_SOURCE_ID" \
-            --container "$CONTAINER_APP_NAME" \
-            --connection arcs_kv \
-            --client-type python 2>&1)
-          CREATE_EXIT=$?
-          
-          if [ $CREATE_EXIT -ne 0 ]; then
-            echo "❌ ERRO ao criar conexão Key Vault:"
-            echo "$ERROR_OUTPUT"
-            exit 1
-          else
-            echo "✅ Key Vault connection created"
-          fi
-          set -e
-      
-      - name: Create or update connection to postgres-flexible
-        run: |
-          set +e
-          # Construir variáveis necessárias
-          SUB_ID="${AZURE_SUBSCRIPTION_ID:-${{ env.AZURE_SUBSCRIPTION_ID }}}"
-          RG_NAME="${RG_NAME_ARCS_HML2:-${{ env.RG_NAME_ARCS_HML2 }}}"
-          CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
-          PG_SERVER="${ARCS_POSTGRES_SERVER_HML2:-${{ env.ARCS_POSTGRES_SERVER_HML2 }}}"
-          PG_DB="${POSTGRES_DB_HML2:-${{ env.POSTGRES_DB_HML2 }}}"
-          
-          # Validar variáveis obrigatórias
-          if [ -z "$SUB_ID" ] || [ -z "$RG_NAME" ] || [ -z "$CONTAINER_APP_NAME" ] || [ -z "$PG_SERVER" ] || [ -z "$PG_DB" ]; then
-            echo "❌ ERRO: Variáveis obrigatórias não estão definidas:"
-            echo "   SUB_ID: ${SUB_ID:-VAZIO}"
-            echo "   RG_NAME: ${RG_NAME:-VAZIO}"
-            echo "   CONTAINER_APP_NAME: ${CONTAINER_APP_NAME:-VAZIO}"
-            echo "   PG_SERVER: ${PG_SERVER:-VAZIO}"
-            echo "   PG_DB: ${PG_DB:-VAZIO}"
-            exit 1
-          fi
-          
-          # Construir IDs corretamente
-          CONTAINER_APP_SOURCE_ID="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.App/containerApps/${CONTAINER_APP_NAME}"
-          PG_TARGET_HML2="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/${PG_SERVER}/databases/${PG_DB}"
-          CONNECTION_NAME="user_${PG_DB}"
-          
           echo "=========================================="
-          echo "Criando conexão PostgreSQL"
+          echo "🔗 Setting up managed connections"
           echo "=========================================="
-          echo "  Source ID: $CONTAINER_APP_SOURCE_ID"
-          echo "  Target ID: $PG_TARGET_HML2"
-          echo "  Connection Name: $CONNECTION_NAME"
-          echo "  Database: $PG_DB"
-          echo ""
           
-          echo "Criando conexão com PostgreSQL do HML2 usando password auth..."
-          echo "  Source ID: $CONTAINER_APP_SOURCE_ID"
-          echo "  Target ID: $PG_TARGET_HML2"
-          echo "  Connection Name: $CONNECTION_NAME"
+          SUB_ID="${{ env.AZURE_SUBSCRIPTION_ID }}"
+          RG_NAME="${{ env.RG_NAME_ARCS_HML2 }}"
+          CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
+          CONTAINER_APP_SOURCE_ID="${{ env.CONTAINER_APP_SOURCE_ID }}"
           
-          # Verificar se o banco de dados existe, criar se não existir
-          echo "1. Verificando se banco de dados '$PG_DB' existe..."
+          # Helper function to create connection
+          create_connection() {
+            local conn_type=$1
+            local conn_name=$2
+            local target_id=$3
+            local client_type=${4:-python}
+            local extra_args=${5:-}
+            
+            if az containerapp connection show \
+              --name "$CONTAINER_APP_NAME" \
+              --resource-group "$RG_NAME" \
+              --connection "$conn_name" \
+              --output none 2>/dev/null; then
+              echo "✅ Connection '$conn_name' already exists"
+              return 0
+            fi
+            
+            echo "Creating $conn_type connection: $conn_name..."
+            ERROR_OUTPUT=$(az containerapp connection create $conn_type \
+              --target-id "$target_id" \
+              --source-id "$CONTAINER_APP_SOURCE_ID" \
+              --container "$CONTAINER_APP_NAME" \
+              --connection "$conn_name" \
+              --client-type "$client_type" \
+              $extra_args 2>&1)
+            CREATE_EXIT=$?
+            
+            if [ $CREATE_EXIT -eq 0 ]; then
+              echo "✅ Connection '$conn_name' created"
+              return 0
+            else
+              echo "⚠️  Failed to create connection '$conn_name': $ERROR_OUTPUT"
+              return 1
+            fi
+          }
+          
+          # Storage Blob
+          STORAGE_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/${{ env.STORAGE_NAME_HML2 }}/blobServices/default"
+          create_connection "storage-blob" "arcsstorage" "$STORAGE_TARGET" "python" "--container $CONTAINER_APP_NAME"
+          
+          # Key Vault
+          KV_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.KeyVault/vaults/${{ env.ARCS_KV_NAME_HML2 }}"
+          create_connection "keyvault" "arcs_kv" "$KV_TARGET"
+          
+          # Redis
+          REDIS_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Cache/redis/redis-arcs-porschecup-hml2"
+          create_connection "redis" "arcsredis" "$REDIS_TARGET"
+          
+          # Web PubSub
+          WPS_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.SignalRService/WebPubSub/${{ env.ARCS_PUBSUB_HML2 }}"
+          create_connection "webpubsub" "arcs_pubsub" "$WPS_TARGET"
+          
+          # PostgreSQL (with password if available)
+          PG_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/${{ env.ARCS_POSTGRES_SERVER_HML2 }}/databases/${{ env.POSTGRES_DB_HML2 }}"
+          CONNECTION_NAME="user_${{ env.POSTGRES_DB_HML2 }}"
+          
+          # Verify database exists
           if ! az postgres flexible-server db show \
             --resource-group "$RG_NAME" \
-            --server-name "$PG_SERVER" \
-            --database-name "$PG_DB" \
+            --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" \
+            --database-name "${{ env.POSTGRES_DB_HML2 }}" \
             --output none 2>/dev/null; then
-            echo "   Banco de dados '$PG_DB' não existe. Criando..."
+            echo "Creating database ${{ env.POSTGRES_DB_HML2 }}..."
             az postgres flexible-server db create \
               --resource-group "$RG_NAME" \
-              --server-name "$PG_SERVER" \
-              --database-name "$PG_DB"
-            if [ $? -eq 0 ]; then
-              echo "   ✅ Banco de dados '$PG_DB' criado com sucesso"
-            else
-              echo "   ❌ ERRO ao criar banco de dados '$PG_DB'"
-              exit 1
-            fi
+              --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" \
+              --database-name "${{ env.POSTGRES_DB_HML2 }}"
+          fi
+          
+          # Try with password first
+          PG_PASSWORD="${{ env.POSTGRES_PASSWORD_HML2 }}"
+          if [ -n "$PG_PASSWORD" ]; then
+            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python" "--secret name=password secret=\"$PG_PASSWORD\"" || \
+            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
           else
-            echo "   ✅ Banco de dados '$PG_DB' já existe"
+            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
           fi
           
-          echo ""
-          echo "2. Verificando se conexão PostgreSQL já existe..."
-          
-          # Verificar se conexão já existe - se existir, não fazer nada
-          if az containerapp connection show \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$RG_NAME" \
-            --connection "$CONNECTION_NAME" \
-            --output none 2>/dev/null; then
-            echo "   ✅ Conexão PostgreSQL já existe. Pulando criação."
-            # Configurar apenas POSTGRES_HOST se necessário
-            POSTGRES_HOST_HML2="${PG_SERVER}.postgres.database.azure.com"
-            az containerapp update \
-              --name "$CONTAINER_APP_NAME" \
-              --resource-group "$RG_NAME" \
-              --set-env-vars POSTGRES_HOST="$POSTGRES_HOST_HML2" \
-              --output none 2>/dev/null || true
-            echo "   ✅ POSTGRES_HOST configurado"
-            exit 0
-          fi
-          
-          # Criar conexão se não existir
-          echo ""
-          echo "3. Criando conexão PostgreSQL..."
-          
-            # Obter password do PostgreSQL
-            PG_PASSWORD="${POSTGRES_PASSWORD_HML2:-${{ env.POSTGRES_PASSWORD_HML2 }}}"
-            if [ -z "$PG_PASSWORD" ]; then
-              # Tentar obter do Key Vault
-              KV_NAME="${ARCS_KV_NAME_HML2:-${{ env.ARCS_KV_NAME_HML2 }}}"
-              if [ -n "$KV_NAME" ]; then
-                PG_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "POSTGRES-PASSWORD-HML2" --query "value" -o tsv 2>/dev/null || echo "")
-              fi
-            fi
-            
-            if [ -z "$PG_PASSWORD" ]; then
-              echo "   ⚠️  POSTGRES_PASSWORD_HML2 não está disponível."
-              echo "   Tentando conexão passwordless (Managed Identity)..."
-              
-              # Tentar criar conexão passwordless (Managed Identity)
-              ERROR_OUTPUT=$(az containerapp connection create postgres-flexible \
-                --target-id "$PG_TARGET_HML2" \
-                --source-id "$CONTAINER_APP_SOURCE_ID" \
-                --container "$CONTAINER_APP_NAME" \
-                --connection "$CONNECTION_NAME" \
-                --client-type python \
-                2>&1)
-              CREATE_EXIT=$?
-              
-              if [ $CREATE_EXIT -ne 0 ]; then
-                echo "   ❌ ERRO ao criar conexão passwordless:"
-                echo "$ERROR_OUTPUT"
-                echo ""
-                echo "   ⚠️  Continuando sem managed connection. As variáveis de ambiente serão configuradas diretamente."
-              else
-                echo "   ✅ PostgreSQL connection created (passwordless)"
-              fi
-            else
-              echo "   Tentando criar conexão com password auth..."
-              ERROR_OUTPUT=$(az containerapp connection create postgres-flexible \
-                --target-id "$PG_TARGET_HML2" \
-                --source-id "$CONTAINER_APP_SOURCE_ID" \
-                --container "$CONTAINER_APP_NAME" \
-                --connection "$CONNECTION_NAME" \
-                --client-type python \
-                --secret name=password secret="$PG_PASSWORD" \
-                2>&1)
-              CREATE_EXIT=$?
-              
-              if [ $CREATE_EXIT -ne 0 ]; then
-                echo "   ⚠️  Tentativa de conexão com password falhou. Tentando passwordless..."
-                echo "   Erro: $ERROR_OUTPUT"
-                
-                # Se falhar, tentar passwordless
-                ERROR_OUTPUT2=$(az containerapp connection create postgres-flexible \
-                  --target-id "$PG_TARGET_HML2" \
-                  --source-id "$CONTAINER_APP_SOURCE_ID" \
-                  --container "$CONTAINER_APP_NAME" \
-                  --connection "$CONNECTION_NAME" \
-                  --client-type python \
-                  2>&1)
-                CREATE_EXIT2=$?
-                
-                if [ $CREATE_EXIT2 -ne 0 ]; then
-                  echo "   ❌ ERRO ao criar conexão PostgreSQL (tanto com password quanto passwordless):"
-                  echo "$ERROR_OUTPUT2"
-                  echo ""
-                  echo "   ⚠️  Continuando sem managed connection. As variáveis de ambiente serão configuradas diretamente."
-                else
-                  echo "   ✅ PostgreSQL connection created (passwordless)"
-                fi
-              else
-                echo "   ✅ PostgreSQL connection created (com password auth)"
-              fi
-            fi
-            
-            # Verificar status imediatamente após criação
-            echo ""
-            echo "4. Verificando status da conexão..."
-            sleep 3  # Aguardar 3 segundos para propagação inicial
-            CONNECTION_STATUS=$(az containerapp connection show \
-              --name "$CONTAINER_APP_NAME" \
-              --resource-group "$RG_NAME" \
-              --connection "$CONNECTION_NAME" \
-              --query "properties.provisioningState" -o tsv 2>/dev/null | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]' || echo "UNKNOWN")
-            
-            echo "   Status atual: $CONNECTION_STATUS"
-            
-            # Se já está Succeeded, não precisa esperar
-            if [ "$CONNECTION_STATUS" == "SUCCEEDED" ]; then
-              echo "   ✅ Conexão PostgreSQL já está com status Succeeded!"
-            else
-              # Só aguardar se não estiver Succeeded
-              echo "   Aguardando conexão ficar com status Succeeded..."
-              MAX_WAIT=60  # 1 minuto (reduzido)
-              WAIT_COUNT=3  # Já aguardou 3 segundos
-              SLEEP_INTERVAL=5
-              
-              while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
-                CONNECTION_STATUS=$(az containerapp connection show \
-                  --name "$CONTAINER_APP_NAME" \
-                  --resource-group "$RG_NAME" \
-                  --connection "$CONNECTION_NAME" \
-                  --query "properties.provisioningState" -o tsv 2>/dev/null | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]' || echo "UNKNOWN")
-                
-                if [ "$CONNECTION_STATUS" == "SUCCEEDED" ]; then
-                  echo "   ✅ Conexão PostgreSQL está com status Succeeded!"
-                  break
-                else
-                  WAIT_COUNT=$((WAIT_COUNT + SLEEP_INTERVAL))
-                  echo "   ⏳ Aguardando... (Status: $CONNECTION_STATUS, aguardado: ${WAIT_COUNT}s/${MAX_WAIT}s)"
-                  sleep $SLEEP_INTERVAL
-                fi
-              done
-              
-              if [ "$CONNECTION_STATUS" != "SUCCEEDED" ]; then
-                echo "   ⚠️  Conexão não ficou com status Succeeded após ${MAX_WAIT}s (Status: $CONNECTION_STATUS)"
-                echo "   Continuando mesmo assim..."
-              fi
-            fi
-          fi
-          
-          # Configurar variáveis de ambiente do PostgreSQL sempre
-          echo ""
-          echo "Configurando variáveis de ambiente do PostgreSQL do HML2..."
-          POSTGRES_HOST_HML2="${PG_SERVER}.postgres.database.azure.com"
-          POSTGRES_PORT_HML2="5432"
-          
-          # Verificar se a conexão managed foi criada
-          if az containerapp connection show \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$RG_NAME" \
-            --connection "$CONNECTION_NAME" \
-            --output none 2>/dev/null; then
-            echo "✅ Conexão managed PostgreSQL verificada e está ativa"
-            echo "   As variáveis de ambiente serão configuradas pela conexão managed."
-          else
-            echo "⚠️  Conexão managed não existe. Configurando variáveis de ambiente manualmente..."
-            
-            # Configurar variáveis de ambiente manualmente
-            POSTGRES_USER_HML2="${PG_SERVER}-admin"
-            POSTGRES_SSLMODE_HML2="require"
-            ENV_VARS="POSTGRES_HOST=$POSTGRES_HOST_HML2 POSTGRES_PORT=$POSTGRES_PORT_HML2 POSTGRES_DB=$PG_DB POSTGRES_USER=$POSTGRES_USER_HML2 POSTGRES_SSLMODE=$POSTGRES_SSLMODE_HML2"
-            
-            # Adicionar password se disponível (para fallback)
-            PG_PASSWORD="${POSTGRES_PASSWORD_HML2:-${{ env.POSTGRES_PASSWORD_HML2 }}}"
-            if [ -z "$PG_PASSWORD" ]; then
-              KV_NAME="${ARCS_KV_NAME_HML2:-${{ env.ARCS_KV_NAME_HML2 }}}"
-              if [ -n "$KV_NAME" ]; then
-                PG_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "POSTGRES-PASSWORD-HML2" --query "value" -o tsv 2>/dev/null || echo "")
-              fi
-            fi
-            
-            if [ -n "$PG_PASSWORD" ]; then
-              ENV_VARS="$ENV_VARS POSTGRES_PASSWORD=$PG_PASSWORD"
-            fi
-            
-            az containerapp update \
-              --name "$CONTAINER_APP_NAME" \
-              --resource-group "$RG_NAME" \
-              --set-env-vars $ENV_VARS \
-              --output none
-            echo "✅ Variáveis de ambiente do PostgreSQL configuradas manualmente"
-            echo "   POSTGRES_HOST=$POSTGRES_HOST_HML2"
-            echo "   POSTGRES_PORT=$POSTGRES_PORT_HML2"
-            echo "   POSTGRES_DB=$PG_DB"
-            echo "   POSTGRES_USER=$POSTGRES_USER_HML2"
-            echo "   POSTGRES_SSLMODE=$POSTGRES_SSLMODE_HML2"
-          fi
-          
-          # Sempre configurar POSTGRES_HOST e outras variáveis necessárias (mesmo se managed connection existir)
-          POSTGRES_USER_HML2="${PG_SERVER}-admin"
-          POSTGRES_SSLMODE_HML2="require"
+          # Configure PostgreSQL env vars
+          POSTGRES_HOST="${{ env.ARCS_POSTGRES_SERVER_HML2 }}.postgres.database.azure.com"
           az containerapp update \
             --name "$CONTAINER_APP_NAME" \
             --resource-group "$RG_NAME" \
             --set-env-vars \
-              POSTGRES_HOST="$POSTGRES_HOST_HML2" \
-              POSTGRES_PORT="$POSTGRES_PORT_HML2" \
-              POSTGRES_DB="$PG_DB" \
-              POSTGRES_USER="$POSTGRES_USER_HML2" \
-              POSTGRES_SSLMODE="$POSTGRES_SSLMODE_HML2" \
+              POSTGRES_HOST="$POSTGRES_HOST" \
+              POSTGRES_PORT="5432" \
+              POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
+              POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" \
+              POSTGRES_SSLMODE="require" \
             --output none
-          echo "✅ Variáveis PostgreSQL configuradas:"
-          echo "   POSTGRES_HOST=$POSTGRES_HOST_HML2"
-          echo "   POSTGRES_PORT=$POSTGRES_PORT_HML2"
-          echo "   POSTGRES_DB=$PG_DB"
-          echo "   POSTGRES_USER=$POSTGRES_USER_HML2"
-          echo "   POSTGRES_SSLMODE=$POSTGRES_SSLMODE_HML2"
-          set -e
-      
-      - name: Create or update connection to redis
-        run: |
-          set +e
-          # Construir variáveis necessárias
-          SUB_ID="${AZURE_SUBSCRIPTION_ID:-${{ env.AZURE_SUBSCRIPTION_ID }}}"
-          RG_NAME="${RG_NAME_ARCS_HML2:-${{ env.RG_NAME_ARCS_HML2 }}}"
-          CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
-          REDIS_NAME="redis-arcs-porschecup-hml2"
           
-          # Construir IDs corretamente
-          CONTAINER_APP_SOURCE_ID="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.App/containerApps/${CONTAINER_APP_NAME}"
-          REDIS_TARGET_HML2="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Cache/redis/${REDIS_NAME}"
-          
-          echo "=========================================="
-          echo "Criando conexão Redis"
-          echo "=========================================="
-          echo "  Source ID: $CONTAINER_APP_SOURCE_ID"
-          echo "  Target ID: $REDIS_TARGET_HML2"
-          echo ""
-          
-          # Verificar se conexão já existe - se existir, não fazer nada
-          if az containerapp connection show \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$RG_NAME" \
-            --connection arcsredis \
-            --output none 2>/dev/null; then
-            echo "✅ Conexão Redis já existe. Pulando criação."
-            exit 0
-          fi
-          
-          # Criar conexão se não existir
-          echo "Conexão Redis não existe, criando..."
-          ERROR_OUTPUT=$(az containerapp connection create redis \
-            --target-id "$REDIS_TARGET_HML2" \
-            --source-id "$CONTAINER_APP_SOURCE_ID" \
-            --container "$CONTAINER_APP_NAME" \
-            --connection arcsredis \
-            --client-type python 2>&1)
-          CREATE_EXIT=$?
-          
-          if [ $CREATE_EXIT -ne 0 ]; then
-            echo "❌ ERRO ao criar conexão Redis:"
-            echo "$ERROR_OUTPUT"
-            echo ""
-            echo "⚠️  Continuando sem managed connection. As variáveis de ambiente já estão configuradas."
-          else
-            echo "✅ Redis connection created"
-          fi
-          set -e
-      
-      - name: Create or update connection to webpubsub
-        run: |
-          set +e
-          # Construir variáveis necessárias
-          SUB_ID="${AZURE_SUBSCRIPTION_ID:-${{ secrets.AZURE_SUBSCRIPTION_ID }}}"
-          RG_NAME="${RG_NAME_ARCS_HML2:-${{ secrets.RG_NAME_ARCS_HML2 }}}"
-          CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
-          WPS_NAME="${ARCS_PUBSUB_HML2:-${{ secrets.ARCS_PUBSUB_HML2 }}}"
-          
-          # Construir IDs corretamente
-          CONTAINER_APP_SOURCE_ID="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.App/containerApps/${CONTAINER_APP_NAME}"
-          WPS_TARGET_HML2="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.SignalRService/WebPubSub/${WPS_NAME}"
-          
-          echo "Criando ou atualizando conexão com Web PubSub do HML2 usando Managed Identity..."
-          echo "  Source ID: $CONTAINER_APP_SOURCE_ID"
-          echo "  Target ID: $WPS_TARGET_HML2"
-          
-          # Verificar se conexão já existe - se existir, não fazer nada
-          if az containerapp connection show \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$RG_NAME" \
-            --connection arcs_pubsub \
-            --output none 2>/dev/null; then
-            echo "✅ Conexão Web PubSub já existe. Pulando criação."
-            exit 0
-          fi
-          
-          # Criar conexão se não existir
-          echo "Conexão Web PubSub não existe, criando..."
-            echo "Conexão Web PubSub não existe, criando..."
-            ERROR_OUTPUT=$(az containerapp connection create webpubsub \
-              --target-id "$WPS_TARGET_HML2" \
-              --source-id "$CONTAINER_APP_SOURCE_ID" \
-              --container "$CONTAINER_APP_NAME" \
-              --connection arcs_pubsub \
-              --client-type python 2>&1)
-            CREATE_EXIT=$?
-            
-            if [ $CREATE_EXIT -ne 0 ]; then
-              echo "❌ ERRO ao criar conexão Web PubSub:"
-              echo "$ERROR_OUTPUT"
-              exit 1
-            else
-              echo "✅ Web PubSub connection created"
-            fi
-          fi
+          echo "✅ Managed connections setup completed"
           set -e
       
   settings:
@@ -765,18 +410,17 @@ jobs:
     environment: HML2
     steps:
       - name: Checkout to the branch
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds:  ${{ secrets.AZURE_CREDENTIALS_HML2 }}
+          creds: ${{ secrets.AZURE_CREDENTIALS_HML2 }}
 
       - name: Load values from App Configuration
         run: |
           APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
           
-          # Função para obter valor do App Config (com fallback para secrets)
           get_config_value() {
             local key=$1
             local secret_fallback=$2
@@ -785,12 +429,10 @@ jobs:
             echo "$secret_fallback"
           }
           
-          # Carregar valores necessários
           AZURE_SUBSCRIPTION_ID=$(get_config_value "AZURE_SUBSCRIPTION_ID_HML2" "${{ secrets.AZURE_SUBSCRIPTION_ID }}")
           RG_NAME_ARCS_HML2=$(get_config_value "RG_NAME_ARCS_HML2" "${{ secrets.RG_NAME_ARCS_HML2 }}")
           APIM_NAME_HML2=$(get_config_value "APIM_NAME_HML2" "${{ secrets.APIM_NAME_HML2 }}")
           
-          # Exportar como variáveis de ambiente
           echo "AZURE_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID" >> $GITHUB_ENV
           echo "RG_NAME_ARCS_HML2=$RG_NAME_ARCS_HML2" >> $GITHUB_ENV
           echo "APIM_NAME_HML2=$APIM_NAME_HML2" >> $GITHUB_ENV
@@ -800,18 +442,18 @@ jobs:
           az account set -s ${{ env.AZURE_SUBSCRIPTION_ID }}
           az configure --defaults group=${{ env.RG_NAME_ARCS_HML2 }}
           az extension add --name containerapp --upgrade
-          # Não usar serviceconnector-passwordless para evitar conflitos com --active-directory-auth
-          # az extension add --name serviceconnector-passwordless --upgrade
+          az extension add --name apim --upgrade || echo "APIM extension already installed"
+
       - name: Get Container App FQDN
         id: get_fqdn
         run: |
           FQDN=$(az containerapp show \
             --name ${{ env.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.RG_NAME_ARCS_HML2 }} \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --query "properties.configuration.ingress.fqdn" -o tsv)
           
           if [ -z "$FQDN" ]; then
-            echo "ERROR: Could not retrieve FQDN for container app ${{ env.CONTAINER_APP_NAME }}"
+            echo "❌ ERROR: Could not retrieve FQDN for container app ${{ env.CONTAINER_APP_NAME }}"
             exit 1
           fi
           
@@ -819,18 +461,15 @@ jobs:
           echo "microservice_fqdn=$FQDN" >> $GITHUB_ENV
           echo "microservice_url=https://$FQDN" >> $GITHUB_ENV
           echo "MICROSERVICE_INTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
-          
-          # ARCS-SERVICE é o próprio serviço, então ARCS_SERVICE_INTERNAL_URL = MICROSERVICE_INTERNAL_URL
           echo "ARCS_SERVICE_INTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
           echo "arcs_service_url=https://$FQDN" >> $GITHUB_ENV
-      
-      - name: Update Container App environment variables with URLs
+
+      - name: Update Container App environment variables
         run: |
-          # Atualizar variáveis de ambiente do Container App com as URLs corretas
           az containerapp update \
             --name ${{ env.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.RG_NAME_ARCS_HML2 }} \
-            --workload-profile-name simulate_prod \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --workload-profile-name hm12 \
             --set-env-vars \
               "MICROSERVICE_INTERNAL_URL=${{ env.MICROSERVICE_INTERNAL_URL }}" \
               "ARCS_SERVICE_INTERNAL_URL=${{ env.ARCS_SERVICE_INTERNAL_URL }}" \
@@ -839,94 +478,75 @@ jobs:
               "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" \
               "REDIS_SSL_PORT=6380"
       
-      - name: Executing post_boot in the microservice
+      - name: Execute post_boot with retries
         run: |
           echo "=========================================="
-          echo "Executing post_boot endpoint"
+          echo "🚀 Executing post_boot endpoint"
           echo "=========================================="
-          echo "Container App: ${{ env.CONTAINER_APP_NAME }}"
-          echo "URL: $microservice_url/lib/post_boot"
-          echo ""
           
-          # Aguardar Container App estar pronto
-          echo "1. Verificando se Container App está pronto..."
-          MAX_WAIT=300  # 5 minutos
+          # Wait for Container App to be ready
+          MAX_WAIT=300
           WAIT_COUNT=0
           SLEEP_INTERVAL=10
           
           while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
             STATUS=$(az containerapp show \
               --name ${{ env.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RG_NAME_ARCS_HML2 }} \
+              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
               --query "properties.provisioningState" -o tsv 2>/dev/null || echo "Unknown")
             
             if [ "$STATUS" == "Succeeded" ]; then
-              echo "✅ Container App está pronto (Status: $STATUS)"
+              echo "✅ Container App is ready"
               break
-            else
-              WAIT_COUNT=$((WAIT_COUNT + SLEEP_INTERVAL))
-              echo "⏳ Aguardando Container App ficar pronto... (Status: $STATUS, aguardado: ${WAIT_COUNT}s/${MAX_WAIT}s)"
-              sleep $SLEEP_INTERVAL
             fi
+            
+            WAIT_COUNT=$((WAIT_COUNT + SLEEP_INTERVAL))
+            echo "⏳ Waiting for Container App... (${WAIT_COUNT}s/${MAX_WAIT}s)"
+            sleep $SLEEP_INTERVAL
           done
           
-          if [ "$STATUS" != "Succeeded" ]; then
-            echo "⚠️  Container App não está pronto após ${MAX_WAIT}s. Continuando mesmo assim..."
-          fi
-          
-          # Aguardar mais um pouco para garantir que a aplicação iniciou
-          echo ""
-          echo "2. Aguardando aplicação iniciar (60 segundos para conexões ficarem prontas)..."
+          # Wait for application to start
+          echo "⏳ Waiting for application to start (60s)..."
           sleep 60
           
-          # Tentar health check primeiro e aguardar até estar saudável
-          echo ""
-          echo "3. Verificando health check (aguardando recursos ficarem prontos)..."
-          HEALTH_URL="$microservice_url/lib/health_check"
-          MAX_HEALTH_WAIT=300  # 5 minutos
+          # Health check with resource validation
+          HEALTH_URL="${{ env.microservice_url }}/lib/health_check"
+          MAX_HEALTH_WAIT=300
           HEALTH_WAIT_COUNT=0
           HEALTH_SLEEP=15
           
+          echo "🔍 Checking health endpoint..."
           while [ $HEALTH_WAIT_COUNT -lt $MAX_HEALTH_WAIT ]; do
-            HEALTH_RESPONSE=$(curl -k -L -s "$HEALTH_URL" --max-time 10 --connect-timeout 5 2>/dev/null || echo "")
             HEALTH_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" --max-time 10 --connect-timeout 5 2>/dev/null || echo "000")
+            HEALTH_RESPONSE=$(curl -k -L -s "$HEALTH_URL" --max-time 10 --connect-timeout 5 2>/dev/null || echo "")
             
             if [ "$HEALTH_CODE" == "200" ]; then
-              # Verificar se os recursos críticos estão prontos
               POSTGRES_OK=$(echo "$HEALTH_RESPONSE" | grep -o '"postgres":[^,}]*' | grep -o 'true' || echo "")
               REDIS_OK=$(echo "$HEALTH_RESPONSE" | grep -o '"redis":[^,}]*' | grep -o 'true' || echo "")
               
               if [ -n "$POSTGRES_OK" ] && [ -n "$REDIS_OK" ]; then
-                echo "✅ Health check OK - Todos os recursos estão prontos (HTTP $HEALTH_CODE)"
+                echo "✅ Health check OK - All resources ready"
                 break
               else
-                echo "⏳ Health check OK mas recursos ainda não prontos (PostgreSQL: ${POSTGRES_OK:-false}, Redis: ${REDIS_OK:-false})"
-                echo "   Aguardando mais ${HEALTH_SLEEP}s... (${HEALTH_WAIT_COUNT}s/${MAX_HEALTH_WAIT}s)"
+                echo "⏳ Resources not ready yet (PostgreSQL: ${POSTGRES_OK:-false}, Redis: ${REDIS_OK:-false})"
               fi
             else
-              echo "⏳ Health check retornou HTTP $HEALTH_CODE. Aguardando... (${HEALTH_WAIT_COUNT}s/${MAX_HEALTH_WAIT}s)"
+              echo "⏳ Health check returned HTTP $HEALTH_CODE"
             fi
             
             HEALTH_WAIT_COUNT=$((HEALTH_WAIT_COUNT + HEALTH_SLEEP))
             sleep $HEALTH_SLEEP
           done
           
-          if [ "$HEALTH_CODE" != "200" ]; then
-            echo "⚠️  Health check não retornou 200 após ${MAX_HEALTH_WAIT}s (HTTP $HEALTH_CODE)"
-            echo "   Continuando mesmo assim..."
-          fi
-          
-          # Tentar post_boot com retries
-          echo ""
-          echo "4. Chamando post_boot endpoint..."
+          # Execute post_boot with retries
           MAX_ATTEMPTS=5
           ATTEMPT=1
           SUCCESS=false
           
           while [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ "$SUCCESS" != "true" ]; do
-            echo "   Tentativa $ATTEMPT/$MAX_ATTEMPTS..."
+            echo "📞 Attempt $ATTEMPT/$MAX_ATTEMPTS: Calling post_boot..."
             
-            HTTP_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" -X POST "$microservice_url/lib/post_boot" \
+            HTTP_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" -X POST "${{ env.microservice_url }}/lib/post_boot" \
               -H "Authorization: TOKEN ${{ secrets.SECRET_ARCS_TOKEN }}" \
               -H "Content-Type: application/json" \
               --data-raw '{}' \
@@ -934,136 +554,171 @@ jobs:
               --connect-timeout 30 \
               2>/dev/null || echo "000")
             
-            echo "   HTTP Status: $HTTP_CODE"
-            
             if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "201" ]; then
               SUCCESS=true
-              echo "✅ SUCCESS: post_boot executed successfully (HTTP $HTTP_CODE)"
-              
-              # Obter resposta completa
-              RESPONSE=$(curl -k -L -s -X POST "$microservice_url/lib/post_boot" \
+              RESPONSE=$(curl -k -L -s -X POST "${{ env.microservice_url }}/lib/post_boot" \
                 -H "Authorization: TOKEN ${{ secrets.SECRET_ARCS_TOKEN }}" \
                 -H "Content-Type: application/json" \
                 --data-raw '{}' \
                 --max-time 60 \
                 --connect-timeout 30)
+              echo "✅ post_boot executed successfully"
               echo "Response: $RESPONSE"
-              break
-            elif [ "$HTTP_CODE" == "000" ]; then
-              echo "   ⚠️  Não foi possível conectar (HTTP 000). Aguardando antes de tentar novamente..."
-              sleep $((ATTEMPT * 10))  # Backoff: 10s, 20s, 30s, 40s, 50s
-            elif [ "$HTTP_CODE" == "404" ]; then
-              echo "   ⚠️  Endpoint não encontrado (HTTP 404). Aguardando antes de tentar novamente..."
-              sleep $((ATTEMPT * 5))
             else
-              echo "   ⚠️  Status inesperado (HTTP $HTTP_CODE). Aguardando antes de tentar novamente..."
+              echo "⚠️  HTTP $HTTP_CODE - Retrying in $((ATTEMPT * 5))s..."
               sleep $((ATTEMPT * 5))
+              ATTEMPT=$((ATTEMPT + 1))
             fi
-            
-            ATTEMPT=$((ATTEMPT + 1))
           done
           
           if [ "$SUCCESS" != "true" ]; then
-            echo ""
-            echo "⚠️  WARNING: post_boot não retornou 200 após $MAX_ATTEMPTS tentativas"
-            echo "   Último HTTP Status: $HTTP_CODE"
-            echo "   Isso não é um erro bloqueante - o deployment continuará."
-            echo ""
-            echo "   Possíveis causas:"
-            echo "   - Container App ainda está iniciando"
-            echo "   - Aplicação não está respondendo corretamente"
-            echo "   - Problemas de rede/conectividade"
+            echo "⚠️  WARNING: post_boot did not return 200 after $MAX_ATTEMPTS attempts"
+            echo "   Deployment will continue, but post_boot may need manual execution"
           fi
-          
-          echo ""
-          echo "Post_boot step completed"
       
-      - name: Change ingress to internal after post_boot
+      - name: Change ingress to internal
+        id: change_ingress
         run: |
           echo "=========================================="
-          echo "Alterando ingress para internal (privado)"
+          echo "🔒 Changing ingress to internal (private)"
           echo "=========================================="
           
-          # Verificar se o CAE tem VNet Integration
-          CAE_VNET=$(az containerapp env show --name ${{ env.ARCS_ENV_APP_HML2 }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.vnetConfiguration.infrastructureSubnetId" -o tsv 2>/dev/null || echo "")
+          # Check if CAE has VNet Integration
+          CAE_VNET=$(az containerapp env show \
+            --name ${{ env.ARCS_ENV_APP_HML2 }} \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --query "properties.vnetConfiguration.infrastructureSubnetId" -o tsv 2>/dev/null || echo "")
           
-          if [ -n "$CAE_VNET" ]; then
-            echo "✅ CAE tem VNet Integration. Alterando ingress para internal..."
-            
-            # Alterar ingress para internal
-            az containerapp ingress enable \
-              --name ${{ env.CONTAINER_APP_NAME }} \
-              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-              --type internal \
-              --target-port ${{ env.CONTAINER_PORT }}
-            
-            echo "✅ Ingress alterado para internal (privado)"
-            echo "   O Container App agora só é acessível via VNet/APIM"
-            
-            # Aguardar alguns segundos para o FQDN interno ser atualizado
-            echo "⏳ Aguardando FQDN interno ser atualizado..."
-            sleep 15
-            
-            # Obter o novo FQDN interno após alterar o ingress
-            echo "📡 Obtendo novo FQDN interno..."
-            INTERNAL_FQDN=$(az containerapp show \
-              --name ${{ env.CONTAINER_APP_NAME }} \
-              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-              --query "properties.configuration.ingress.fqdn" -o tsv)
-            
-            if [ -n "$INTERNAL_FQDN" ]; then
-              echo "✅ FQDN interno obtido: $INTERNAL_FQDN"
-              echo "microservice_fqdn=$INTERNAL_FQDN" >> $GITHUB_ENV
-              echo "microservice_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
-              echo "MICROSERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
-              echo "ARCS_SERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
-              echo "arcs_service_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
-              echo ""
-              echo "✅ URLs atualizadas para usar FQDN interno (privado)"
-            else
-              echo "⚠️  Não foi possível obter FQDN interno. Mantendo FQDN anterior."
-            fi
-          else
-            echo "⚠️  CAE não tem VNet Integration. Mantendo ingress como external."
-            echo "   Para tornar privado, configure VNet Integration no CAE primeiro."
+          if [ -z "$CAE_VNET" ]; then
+            echo "⚠️  CAE does not have VNet Integration"
+            echo "   Keeping ingress as external"
+            echo "   To make it private, configure VNet Integration in CAE first"
+            echo "ingress_changed=false" >> $GITHUB_ENV
+            exit 0
           fi
           
-      - name: Check if API exists in API Management
-        id: check_api
+          echo "✅ CAE has VNet Integration. Changing ingress to internal..."
+          
+          az containerapp ingress enable \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --type internal \
+            --target-port ${{ env.CONTAINER_PORT }}
+          
+          echo "✅ Ingress changed to internal (private)"
+          echo "   Container App is now only accessible via VNet/APIM"
+          
+          # Wait for FQDN to update
+          echo "⏳ Waiting for internal FQDN to be updated..."
+          sleep 20
+          
+          # Get new internal FQDN
+          INTERNAL_FQDN=$(az containerapp show \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          
+          if [ -n "$INTERNAL_FQDN" ]; then
+            echo "✅ Internal FQDN: $INTERNAL_FQDN"
+            echo "microservice_fqdn=$INTERNAL_FQDN" >> $GITHUB_ENV
+            echo "microservice_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+            echo "MICROSERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+            echo "ARCS_SERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+            echo "arcs_service_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+            echo "ingress_changed=true" >> $GITHUB_ENV
+          else
+            echo "⚠️  Could not retrieve internal FQDN"
+            echo "ingress_changed=false" >> $GITHUB_ENV
+          fi
+
+      - name: Verify APIM connectivity to Container App
         run: |
-          if az apim api show --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --service-name ${{ env.APIM_NAME_HML2 }} --api-id ${{ env.CONTAINER_APP_NAME }} 2>/dev/null; then
-            echo "API ${{ env.CONTAINER_APP_NAME }}: exists."
+          echo "=========================================="
+          echo "🔍 Verifying APIM connectivity to Container App"
+          echo "=========================================="
+          
+          # Check if APIM has VNet connectivity
+          APIM_VNET=$(az apim show \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --name ${{ env.APIM_NAME_HML2 }} \
+            --query "properties.virtualNetworkType" -o tsv 2>/dev/null || echo "None")
+          
+          echo "APIM VNet Type: $APIM_VNET"
+          
+          if [ "$APIM_VNET" == "None" ] || [ "$APIM_VNET" == "External" ]; then
+            echo "⚠️  WARNING: APIM is not configured with VNet integration"
+            echo "   APIM may not be able to reach internal Container App"
+            echo "   Consider configuring APIM with VNet integration"
+          else
+            echo "✅ APIM has VNet integration configured"
+          fi
+          
+          # Verify backend URL is internal
+          BACKEND_URL="${{ env.microservice_url }}"
+          if [[ "$BACKEND_URL" == *".azurecontainerapps.io"* ]]; then
+            echo "✅ Backend URL is using Container App FQDN: $BACKEND_URL"
+          else
+            echo "⚠️  WARNING: Backend URL may not be correct: $BACKEND_URL"
+          fi
+
+      - name: Configure API in APIM
+        id: configure_apim
+        run: |
+          echo "=========================================="
+          echo "🔧 Configuring API in APIM"
+          echo "=========================================="
+          
+          API_ID="${{ env.CONTAINER_APP_NAME }}"
+          BACKEND_URL="${{ env.microservice_url }}"
+          
+          # Check if API exists
+          if az apim api show \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --service-name ${{ env.APIM_NAME_HML2 }} \
+            --api-id "$API_ID" \
+            --output none 2>/dev/null; then
+            echo "✅ API already exists. Updating..."
             echo "api_exists=true" >> $GITHUB_ENV
+            
+            az apim api update \
+              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+              --service-name ${{ env.APIM_NAME_HML2 }} \
+              --api-id "$API_ID" \
+              --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
+              --path "${{ vars.APIM_API_ROUTE_PATH }}" \
+              --service-url "$BACKEND_URL" \
+              --protocols "${{ vars.APIM_API_PROTOCOLS }}" \
+              --description "${{ vars.APIM_API_DESCRIPTION }}"
           else
-            echo "API ${{ env.CONTAINER_APP_NAME }}: does not exist."
+            echo "ℹ️  API does not exist. Creating..."
             echo "api_exists=false" >> $GITHUB_ENV
+            
+            az apim api create \
+              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+              --service-name ${{ env.APIM_NAME_HML2 }} \
+              --api-id "$API_ID" \
+              --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
+              --path "${{ vars.APIM_API_ROUTE_PATH }}" \
+              --service-url "$BACKEND_URL" \
+              --protocols "${{ vars.APIM_API_PROTOCOLS }}" \
+              --description "${{ vars.APIM_API_DESCRIPTION }}"
           fi
-      - name: Create endpoint in API Management
-        if: env.api_exists == 'false'
+          
+          echo "✅ API configured in APIM"
+          echo "   Backend URL: $BACKEND_URL"
+          echo "   Path: ${{ vars.APIM_API_ROUTE_PATH }}"
+
+      - name: Import/Update OpenAPI specification in APIM
         run: |
-          az apim api create \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --service-name ${{ env.APIM_NAME_HML2 }} \
-            --api-id ${{ env.CONTAINER_APP_NAME }} \
-            --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
-            --path "${{ vars.APIM_API_ROUTE_PATH }}" \
-            --service-url "$microservice_url" \
-            --protocols ${{ vars.APIM_API_PROTOCOLS }} \
-            --description "${{ vars.APIM_API_DESCRIPTION }}"
-      - name: Update endpoint in API Management
-        if: env.api_exists == 'true'
-        run: |
-          az apim api update \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --service-name ${{ env.APIM_NAME_HML2 }} \
-            --api-id ${{ env.CONTAINER_APP_NAME }} \
-            --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
-            --path ${{ vars.APIM_API_ROUTE_PATH }} \
-            --service-url "$microservice_url" \
-            --protocols ${{ vars.APIM_API_PROTOCOLS }} \
-            --description "${{ vars.APIM_API_DESCRIPTION }}"
-      - name: Import/Update API in APIM
-        run: |
+          echo "=========================================="
+          echo "📄 Importing OpenAPI specification"
+          echo "=========================================="
+          
+          if [ ! -f "${{ github.workspace }}/infra/openapi.yml" ]; then
+            echo "⚠️  OpenAPI file not found. Skipping import..."
+            exit 0
+          fi
+          
           az apim api import \
             --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --service-name ${{ env.APIM_NAME_HML2 }} \
@@ -1071,12 +726,68 @@ jobs:
             --path "${{ vars.APIM_API_ROUTE_PATH }}" \
             --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
             --description "${{ vars.APIM_API_DESCRIPTION }}" \
-            --service-url "$microservice_url" \
+            --service-url "${{ env.microservice_url }}" \
             --specification-path ${{ github.workspace }}/infra/openapi.yml \
             --specification-format OpenApi \
             --protocols https
-      - name: Skip microservice registration (ARCS-SERVICE is the registry itself)
+          
+          echo "✅ OpenAPI specification imported"
+
+      - name: Verify APIM backend connectivity
         run: |
+          echo "=========================================="
+          echo "🔍 Verifying APIM backend connectivity"
+          echo "=========================================="
+          
+          # Get API backend URL
+          BACKEND_URL=$(az apim api show \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --service-name ${{ env.APIM_NAME_HML2 }} \
+            --api-id ${{ env.CONTAINER_APP_NAME }} \
+            --query "properties.serviceUrl" -o tsv 2>/dev/null || echo "")
+          
+          if [ -z "$BACKEND_URL" ]; then
+            echo "⚠️  Could not retrieve backend URL from APIM"
+            exit 0
+          fi
+          
+          echo "Backend URL configured in APIM: $BACKEND_URL"
+          echo "Expected internal URL: ${{ env.microservice_url }}"
+          
+          if [ "$BACKEND_URL" == "${{ env.microservice_url }}" ]; then
+            echo "✅ Backend URL matches expected internal URL"
+          else
+            echo "⚠️  WARNING: Backend URL does not match expected internal URL"
+            echo "   This may cause connectivity issues if Container App is internal"
+          fi
+          
+          # Test connectivity (if external ingress still exists)
+          if [ "${{ env.ingress_changed }}" != "true" ]; then
+            echo "Testing backend connectivity..."
+            HTTP_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/lib/health_check" --max-time 10 --connect-timeout 5 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" == "200" ]; then
+              echo "✅ Backend is reachable (HTTP $HTTP_CODE)"
+            else
+              echo "⚠️  Backend returned HTTP $HTTP_CODE (may be expected if internal)"
+            fi
+          else
+            echo "ℹ️  Skipping connectivity test (Container App is internal)"
+          fi
+
+      - name: Deployment summary
+        run: |
+          echo "=========================================="
+          echo "✅ DEPLOYMENT SUMMARY"
+          echo "=========================================="
+          echo "Container App: ${{ env.CONTAINER_APP_NAME }}"
+          echo "Internal URL: ${{ env.microservice_url }}"
+          echo "External URL: ${{ env.MICROSERVICE_EXTERNAL_URL }}"
+          echo "APIM Service: ${{ env.APIM_NAME_HML2 }}"
+          echo "Ingress Type: $([ "${{ env.ingress_changed }}" == "true" ] && echo "Internal (Private)" || echo "External")"
+          echo "=========================================="
+          echo ""
           echo "ℹ️  ARCS-SERVICE is the central service registry."
-          echo "It does not need to register itself - other microservices register with it."
-          echo "Deployment completed successfully."
+          echo "   It does not need to register itself."
+          echo "   Other microservices register with it."
+          echo ""
+          echo "✅ Deployment completed successfully!"
