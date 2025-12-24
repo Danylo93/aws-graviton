@@ -228,10 +228,21 @@ jobs:
           CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
           CONTAINER_APP_SOURCE_ID="${{ env.CONTAINER_APP_SOURCE_ID }}"
           
-          # Carregar secrets do service principal do App Config
+          # Carregar secrets do service principal do App Config ou GitHub Secrets
           AZURE_CLIENT_ID="${{ env.AZURE_CLIENT_ID_HML2 }}"
           AZURE_CLIENT_SECRET="${{ env.AZURE_CLIENT_SECRET_HML2 }}"
           AZURE_CLIENT_OBJECT_ID="${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }}"
+          
+          # Verificar se os secrets estão disponíveis
+          if [ -z "$AZURE_CLIENT_ID" ] || [ -z "$AZURE_CLIENT_SECRET" ]; then
+            echo "⚠️  WARNING: Service principal credentials not available!"
+            echo "   AZURE_CLIENT_ID_HML2: ${AZURE_CLIENT_ID:-NOT SET}"
+            echo "   AZURE_CLIENT_SECRET_HML2: ${AZURE_CLIENT_SECRET:+SET}${AZURE_CLIENT_SECRET:-NOT SET}"
+            echo "   PostgreSQL connection will be created with managed identity instead."
+          else
+            echo "✅ Service principal credentials available"
+            echo "   AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:0:8}..."
+          fi
           
           create_connection() {
             local conn_type=$1
@@ -433,7 +444,7 @@ jobs:
 
       - name: Update Container App env vars
         run: |
-          # Carregar variáveis do PostgreSQL
+          # Carregar variáveis do App Config
           APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
           get_config_value() {
             local key=$1
@@ -443,24 +454,68 @@ jobs:
             echo "$secret_fallback"
           }
           
+          # Carregar secrets do Key Vault
+          KV_NAME="arcs-kv-hml2"
+          get_kv_secret() {
+            local secret_name=$1
+            az keyvault secret show --vault-name "$KV_NAME" --name "$secret_name" --query "value" -o tsv 2>/dev/null || echo ""
+          }
+          
           ARCS_POSTGRES_SERVER_HML2=$(get_config_value "ARCS_POSTGRES_SERVER_HML2" "${{ secrets.ARCS_POSTGRES_SERVER_HML2 }}")
           POSTGRES_DB_HML2=$(get_config_value "POSTGRES_DB_HML2" "${{ secrets.POSTGRES_DB_HML2 }}")
+          POSTGRES_PASSWORD_HML2=$(get_config_value "POSTGRES_PASSWORD_HML2" "${{ secrets.POSTGRES_PASSWORD_HML2 }}")
+          STORAGE_NAME_HML2=$(get_config_value "STORAGE_NAME_HML2" "${{ secrets.STORAGE_NAME_HML2 }}")
+          STORAGE_KEY_HML2=$(get_config_value "STORAGE_KEY_HML2" "${{ secrets.STORAGE_KEY_HML2 }}")
+          STORAGE_BLOB_URL_HML2=$(get_config_value "STORAGE_BLOB_URL_HML2" "${{ secrets.STORAGE_BLOB_URL_HML2 }}")
           
-          # Atualizar variáveis de ambiente (mantendo as que vêm do Service Connector e adicionando as manuais necessárias)
-          az containerapp update --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --set-env-vars \
-            "MICROSERVICE_INTERNAL_URL=${{ env.MICROSERVICE_INTERNAL_URL }}" \
-            "ARCS_SERVICE_INTERNAL_URL=${{ env.ARCS_SERVICE_INTERNAL_URL }}" \
-            "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" \
-            "REDIS_PORT=6379" \
-            "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" \
-            "REDIS_SSL_PORT=6380" \
-            "MICROSERVICE_PORT=8000" \
-            "POSTGRES_HOST=${ARCS_POSTGRES_SERVER_HML2}.postgres.database.azure.com" \
-            "POSTGRES_PORT=5432" \
-            "POSTGRES_DB=${POSTGRES_DB_HML2}" \
-            "POSTGRES_USER=${ARCS_POSTGRES_SERVER_HML2}-admin" \
-            "POSTGRES_SSLMODE=require"
+          # Tentar obter do Key Vault se não estiver no App Config
+          if [ -z "$POSTGRES_PASSWORD_HML2" ]; then
+            POSTGRES_PASSWORD_HML2=$(get_kv_secret "POSTGRES-PASSWORD-HML2")
+          fi
+          if [ -z "$STORAGE_KEY_HML2" ]; then
+            STORAGE_KEY_HML2=$(get_kv_secret "STORAGE-KEY-HML2")
+          fi
+          
+          # Construir lista de variáveis de ambiente
+          ENV_VARS=(
+            "MICROSERVICE_INTERNAL_URL=${{ env.MICROSERVICE_INTERNAL_URL }}"
+            "ARCS_SERVICE_INTERNAL_URL=${{ env.ARCS_SERVICE_INTERNAL_URL }}"
+            "MICROSERVICE_PORT=8000"
+            "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net"
+            "REDIS_PORT=6379"
+            "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}"
+            "REDIS_SSL_PORT=6380"
+            "ENV=DEVELOPMENT"
+          )
+          
+          # Adicionar PostgreSQL HML2 se disponível
+          if [ -n "$ARCS_POSTGRES_SERVER_HML2" ]; then
+            ENV_VARS+=("POSTGRES_HOST=${ARCS_POSTGRES_SERVER_HML2}.postgres.database.azure.com")
+            ENV_VARS+=("POSTGRES_PORT=5432")
+            ENV_VARS+=("POSTGRES_DB=${POSTGRES_DB_HML2}")
+            ENV_VARS+=("POSTGRES_USER=${ARCS_POSTGRES_SERVER_HML2}-admin")
+            ENV_VARS+=("POSTGRES_SSLMODE=require")
+          fi
+          if [ -n "$POSTGRES_PASSWORD_HML2" ]; then
+            ENV_VARS+=("postgres_password=${POSTGRES_PASSWORD_HML2}")
+          fi
+          
+          # Adicionar Storage HML2 se disponível
+          if [ -n "$STORAGE_NAME_HML2" ]; then
+            ENV_VARS+=("storage_name=${STORAGE_NAME_HML2}")
+          fi
+          if [ -n "$STORAGE_KEY_HML2" ]; then
+            ENV_VARS+=("storage_key=${STORAGE_KEY_HML2}")
+          fi
+          if [ -n "$STORAGE_BLOB_URL_HML2" ]; then
+            ENV_VARS+=("STORAGE_BLOB_URL=${STORAGE_BLOB_URL_HML2}")
+          fi
+          
+          # Atualizar Container App
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --set-env-vars "${ENV_VARS[@]}"
       
       - name: Execute post_boot
         run: |
