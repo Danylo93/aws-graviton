@@ -63,12 +63,12 @@ RUN poetry check \
     # Clear cache to reduce image size
     && poetry cache clear --all pypi
 
-# Add security certificates
-RUN apk add --no-cache ca-certificates
+# Add security certificates and openssl (needed to generate pub-arcs.pem from priv-arcs.pem)
+RUN apk add --no-cache ca-certificates openssl
 # Create /app/keys directory (required by arcs_lib_pca)
 RUN mkdir -p /app/keys
 
-# Create startup script to write priv-arcs.pem from secret
+# Create startup script to write priv-arcs.pem from secret and generate pub-arcs.pem
 RUN echo '#!/bin/sh' > /app/start.sh && \
     echo 'set -e' >> /app/start.sh && \
     echo 'mkdir -p /app/keys' >> /app/start.sh && \
@@ -76,6 +76,15 @@ RUN echo '#!/bin/sh' > /app/start.sh && \
     echo '  echo "$PRIV_ARCS_PEM" > /app/keys/priv-arcs.pem' >> /app/start.sh && \
     echo '  chmod 600 /app/keys/priv-arcs.pem' >> /app/start.sh && \
     echo '  echo "✅ priv-arcs.pem criado a partir do secret"' >> /app/start.sh && \
+    echo '  # Gerar pub-arcs.pem a partir de priv-arcs.pem' >> /app/start.sh && \
+    echo '  if openssl rsa -in /app/keys/priv-arcs.pem -pubout -out /app/keys/pub-arcs.pem 2>/dev/null; then' >> /app/start.sh && \
+    echo '    chmod 644 /app/keys/pub-arcs.pem' >> /app/start.sh && \
+    echo '    echo "✅ pub-arcs.pem gerado a partir de priv-arcs.pem"' >> /app/start.sh && \
+    echo '  else' >> /app/start.sh && \
+    echo '    echo "⚠️  Falha ao gerar pub-arcs.pem, tentando com formato diferente..."' >> /app/start.sh && \
+    echo '    # Tentar com formato diferente (algumas chaves podem ser ECDSA ou outros formatos)' >> /app/start.sh && \
+    echo '    openssl pkey -in /app/keys/priv-arcs.pem -pubout -out /app/keys/pub-arcs.pem 2>/dev/null && chmod 644 /app/keys/pub-arcs.pem && echo "✅ pub-arcs.pem gerado (formato alternativo)" || echo "❌ Falha ao gerar pub-arcs.pem"' >> /app/start.sh && \
+    echo '  fi' >> /app/start.sh && \
     echo 'else' >> /app/start.sh && \
     echo '  echo "⚠️  PRIV_ARCS_PEM não está definido"' >> /app/start.sh && \
     echo 'fi' >> /app/start.sh && \
