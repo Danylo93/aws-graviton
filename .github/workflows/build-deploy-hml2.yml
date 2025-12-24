@@ -330,13 +330,23 @@ jobs:
             az postgres flexible-server db create --resource-group "$RG_NAME" --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" --database-name "${{ env.POSTGRES_DB_HML2 }}"
           fi
           
-          # Tentar criar conexão com password se disponível, caso contrário sem password
-          PG_PASSWORD="${{ env.POSTGRES_PASSWORD_HML2 }}"
-          if [ -n "$PG_PASSWORD" ]; then
-            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python" "--secret name=password secret=\"$PG_PASSWORD\"" || \
-            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
+          # Criar conexão PostgreSQL igual ao HML (com --yes e service-principal com object-id)
+          if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CLIENT_SECRET" ] && [ -n "$AZURE_CLIENT_OBJECT_ID" ]; then
+            if ! az containerapp connection show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --connection "$CONNECTION_NAME" --output none 2>/dev/null; then
+              echo "🔗 Creating PostgreSQL connection $CONNECTION_NAME..."
+              az containerapp connection create postgres-flexible \
+                --target-id "$PG_TARGET" \
+                --source-id "$CONTAINER_APP_SOURCE_ID" \
+                --container "$CONTAINER_APP_NAME" \
+                --connection "$CONNECTION_NAME" \
+                --client-type python \
+                --service-principal client-id="$AZURE_CLIENT_ID" object-id="$AZURE_CLIENT_OBJECT_ID" secret="$AZURE_CLIENT_SECRET" \
+                --yes
+            else
+              echo "✅ PostgreSQL connection $CONNECTION_NAME already exists"
+            fi
           else
-            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
+            echo "⚠️  Service principal credentials not available, skipping PostgreSQL connection"
           fi
           
           # Configurar variáveis de ambiente do PostgreSQL
