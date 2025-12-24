@@ -284,6 +284,10 @@ jobs:
             # Se service principal está disponível, usar --service-principal
             if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CLIENT_SECRET" ]; then
               if [ "$conn_type" == "postgres-flexible" ] && [ -n "$AZURE_CLIENT_OBJECT_ID" ]; then
+                # Para PostgreSQL, adicionar --yes se não estiver nos extra_args
+                if [[ "$extra_args" != *"--yes"* ]]; then
+                  extra_args="$extra_args --yes"
+                fi
                 az containerapp connection create $conn_type \
                   --target-id "$target_id" \
                   --source-id "$CONTAINER_APP_SOURCE_ID" \
@@ -329,7 +333,7 @@ jobs:
             az postgres flexible-server db create --resource-group "$RG_NAME" --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" --database-name "${{ env.POSTGRES_DB_HML2 }}"
           fi
           
-          create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
+          create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python" "--yes"
           
           # Web PubSub
           create_connection "webpubsub" "arcs_pubsub" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.SignalRService/WebPubSub/${{ env.ARCS_PUBSUB_HML2 }}" "python"
