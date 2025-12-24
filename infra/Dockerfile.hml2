@@ -24,7 +24,7 @@ RUN python3 -m venv $POETRY_VENV \
     && $POETRY_VENV/bin/pip install -U pip setuptools \
     && $POETRY_VENV/bin/pip install poetry==${POETRY_VERSION}
 
-RUN apk add --no-cache curl git gcc musl-dev libffi-dev build-base jq bash python3-dev linux-headers
+RUN apk add --no-cache curl git gcc musl libffi build-base jq bash
 
 # Add Poetry to PATH
 ENV PATH=$POETRY_VENV/bin:$PATH
@@ -63,52 +63,8 @@ RUN poetry check \
     # Clear cache to reduce image size
     && poetry cache clear --all pypi
 
-# Add security certificates and openssl (needed to generate pub-arcs.pem from priv-arcs.pem)
-RUN apk add --no-cache ca-certificates openssl
-# Create /app/keys directory (required by arcs_lib_pca)
-RUN mkdir -p /app/keys
-
-# Create startup script to write priv-arcs.pem from secret and generate pub-arcs.pem
-RUN echo '#!/bin/sh' > /app/start.sh && \
-    echo 'set -e' >> /app/start.sh && \
-    echo 'mkdir -p /app/keys' >> /app/start.sh && \
-    echo 'if [ -n "$PRIV_ARCS_PEM" ]; then' >> /app/start.sh && \
-    echo '  # Escrever o conteúdo do secret no arquivo usando cat com heredoc para preservar formatação' >> /app/start.sh && \
-    echo '  cat > /app/keys/priv-arcs.pem <<EOFPRIV' >> /app/start.sh && \
-    echo '$PRIV_ARCS_PEM' >> /app/start.sh && \
-    echo 'EOFPRIV' >> /app/start.sh && \
-    echo '  chmod 600 /app/keys/priv-arcs.pem' >> /app/start.sh && \
-    echo '  echo "✅ priv-arcs.pem criado a partir do secret"' >> /app/start.sh && \
-    echo '  # Verificar se o arquivo foi criado corretamente' >> /app/start.sh && \
-    echo '  if [ ! -f /app/keys/priv-arcs.pem ] || [ ! -s /app/keys/priv-arcs.pem ]; then' >> /app/start.sh && \
-    echo '    echo "❌ Erro: priv-arcs.pem não foi criado ou está vazio"' >> /app/start.sh && \
-    echo '    exit 1' >> /app/start.sh && \
-    echo '  fi' >> /app/start.sh && \
-    echo '  # Gerar pub-arcs.pem a partir de priv-arcs.pem' >> /app/start.sh && \
-    echo '  OPENSSL_ERROR=$(openssl rsa -in /app/keys/priv-arcs.pem -pubout -out /app/keys/pub-arcs.pem 2>&1)' >> /app/start.sh && \
-    echo '  if [ $? -eq 0 ]; then' >> /app/start.sh && \
-    echo '    chmod 644 /app/keys/pub-arcs.pem' >> /app/start.sh && \
-    echo '    echo "✅ pub-arcs.pem gerado a partir de priv-arcs.pem"' >> /app/start.sh && \
-    echo '  else' >> /app/start.sh && \
-    echo '    echo "⚠️  Falha ao gerar pub-arcs.pem com rsa: $OPENSSL_ERROR"' >> /app/start.sh && \
-    echo '    echo "Tentando com pkey..."' >> /app/start.sh && \
-    echo '    OPENSSL_ERROR2=$(openssl pkey -in /app/keys/priv-arcs.pem -pubout -out /app/keys/pub-arcs.pem 2>&1)' >> /app/start.sh && \
-    echo '    if [ $? -eq 0 ]; then' >> /app/start.sh && \
-    echo '      chmod 644 /app/keys/pub-arcs.pem' >> /app/start.sh && \
-    echo '      echo "✅ pub-arcs.pem gerado com pkey"' >> /app/start.sh && \
-    echo '    else' >> /app/start.sh && \
-    echo '      echo "❌ Falha ao gerar pub-arcs.pem com ambos os métodos"' >> /app/start.sh && \
-    echo '      echo "Erro pkey: $OPENSSL_ERROR2"' >> /app/start.sh && \
-    echo '      exit 1' >> /app/start.sh && \
-    echo '    fi' >> /app/start.sh && \
-    echo '  fi' >> /app/start.sh && \
-    echo 'else' >> /app/start.sh && \
-    echo '  echo "⚠️  PRIV_ARCS_PEM não está definido"' >> /app/start.sh && \
-    echo '  exit 1' >> /app/start.sh && \
-    echo 'fi' >> /app/start.sh && \
-    echo 'exec poetry run gunicorn -w 4 --bind 0.0.0.0:8000 main:wsgi_app' >> /app/start.sh && \
-    chmod +x /app/start.sh
-
+# Add security certificates
+RUN apk add --no-cache ca-certificates
 # Create a non-root user and set permissions for /app
 RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
 
@@ -119,4 +75,4 @@ USER appuser
 EXPOSE 8000
 
 # Set the entrypoint
-ENTRYPOINT ["/app/start.sh"]
+ENTRYPOINT ["poetry", "run", "gunicorn", "-w", "4", "--bind", "0.0.0.0:8000", "main:wsgi_app"]
