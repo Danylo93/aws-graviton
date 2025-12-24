@@ -239,7 +239,12 @@ jobs:
             --target-port ${{ env.CONTAINER_PORT }} \
             --min-replicas 1 \
             --env-vars "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380" "MICROSERVICE_PORT=8000" \
-            --secrets "priv-arcs-pem=keyvault:https://${{ env.ARCS_KV_NAME_HML2 }}.vault.azure.net/secrets/PRIV-ARCS-PEM" \
+            --secrets "priv-arcs-pem=keyvault:https://${{ env.ARCS_KV_NAME_HML2 }}.vault.azure.net/secrets/PRIV-ARCS-PEM"
+          
+          # Adicionar variável de ambiente que referencia o secret (após criar o secret)
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --set-env-vars "PRIV_ARCS_PEM=secretref:priv-arcs-pem"
       
       - name: Update Container App
@@ -255,13 +260,25 @@ jobs:
               --target-port ${{ env.CONTAINER_PORT }}
           fi
           
+          # Atualizar imagem e variáveis de ambiente
           az containerapp update \
             --name ${{ env.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --image ${{ env.ACR_NAME_HML2 }}.azurecr.io/${{ github.event.repository.name }}:${{ github.sha }} \
             --min-replicas 1 \
-            --set-env-vars "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380" \
+            --set-env-vars "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380"
+          
+          # Garantir que o secret existe
+          az containerapp secret set \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --secrets "priv-arcs-pem=keyvault:https://${{ env.ARCS_KV_NAME_HML2 }}.vault.azure.net/secrets/PRIV-ARCS-PEM" \
+            --output none 2>/dev/null || true
+          
+          # Adicionar variável de ambiente que referencia o secret
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --set-env-vars "PRIV_ARCS_PEM=secretref:priv-arcs-pem"
   
       - name: Assign managed identity
