@@ -5,16 +5,6 @@ from http import HTTPStatus
 from pydantic import HttpUrl, EmailStr
 from datetime import timedelta
 
-from sqlalchemy.exc import SQLAlchemyError, OperationalError
-try:
-    from psycopg.errors import OperationalError as PsycopgOperationalError
-except ImportError:
-    # Fallback para psycopg2 ou versões antigas
-    try:
-        from psycopg2 import OperationalError as PsycopgOperationalError
-    except ImportError:
-        PsycopgOperationalError = OperationalError  # Usar SQLAlchemy OperationalError como fallback
-
 from arcs_lib_pca.use_case import execute_use_case
 from arcs_lib_pca.use_case.postgres import QueryParamsUseCase
 
@@ -75,35 +65,20 @@ class PilotController(BaseController):
         if req.has_errors():
             return resp(status_code=HTTPStatus.BAD_REQUEST, message="Invalid request")
 
-        try:
-            pilot_repo = self.load_repository(PilotModel)
-            subquery_params = QueryParamsUseCase.load(req.params)
-            pilots = pilot_repo.db.with_query(subquery_params).paginate(
-                per_page=req.per_page,
-                page=req.page,
-                load=["person", "profile", "creator", "deletor", "updator"],
-                filters=[PilotModel.status == PilotStatusEnum.ACTIVE.value]
-            )
+        pilot_repo = self.load_repository(PilotModel)
+        subquery_params = QueryParamsUseCase.load(req.params)
+        pilots = pilot_repo.db.with_query(subquery_params).paginate(
+            per_page=req.per_page,
+            page=req.page,
+            load=["person", "profile", "creator", "deletor", "updator"],
+            filters=[PilotModel.status == PilotStatusEnum.ACTIVE.value]
+        )
 
-            items = [{"id": item["profile_id"], "name": item["name"]} for item in pilots["items"]]
+        items = [{"id": item["profile_id"], "name": item["name"]} for item in pilots["items"]]
 
-            pilots["items"] = items
+        pilots["items"] = items
 
-            return resp(HTTPStatus.OK, pilots, "Successfully")
-        except (OperationalError, PsycopgOperationalError, SQLAlchemyError) as e:
-            # Em caso de erro de conexão com PostgreSQL, retornar array vazio
-            empty_pilots = {
-                "items": [],
-                "total_items": 0,
-                "total_pages": 0,
-                "current_page": req.page or 1,
-                "per_page": req.per_page or 10,
-                "has_next": False,
-                "has_prev": False,
-                "next_page": None,
-                "prev_page": None
-            }
-            return resp(HTTPStatus.OK, empty_pilots, "Successfully")
+        return resp(HTTPStatus.OK, pilots, "Successfully")
 
     @BaseController.route(
         path="/",

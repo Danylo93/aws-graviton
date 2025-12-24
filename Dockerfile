@@ -34,7 +34,7 @@ RUN printf  "#!/bin/sh \
             cd ./service \
             \n \
             ## Run poetry install \n \
-            poetry install --no-root --with dev --without prod --without hml2 --no-interaction \n \
+            poetry install --no-root --with dev --without prod --without hml --no-interaction \n \
             poetry update arcs-lib-pca \
             \n \
             ## Apply migrations \n \
