@@ -38,8 +38,31 @@ jobs:
           get_config_value() {
             local key=$1
             local secret_fallback=$2
-            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" --query "value" -o tsv 2>/dev/null || \
-            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --query "value" -o tsv 2>/dev/null || \
+            
+            # Tentar ler do App Config
+            KV_REF=$(az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" -o json 2>/dev/null || \
+                     az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" -o json 2>/dev/null)
+            
+            if [ -n "$KV_REF" ]; then
+              # Verificar se é referência do Key Vault
+              CONTENT_TYPE=$(echo "$KV_REF" | jq -r '.contentType // ""' 2>/dev/null)
+              if [[ "$CONTENT_TYPE" == *"keyvaultref"* ]]; then
+                # É referência do Key Vault, extrair URI e buscar o valor
+                KV_URI=$(echo "$KV_REF" | jq -r '.value.uri // .value // ""' 2>/dev/null)
+                if [ -n "$KV_URI" ]; then
+                  # Extrair nome do secret da URI (última parte após /secrets/)
+                  SECRET_NAME=$(echo "$KV_URI" | sed 's|.*/secrets/||' | sed 's|/.*||')
+                  VAULT_NAME=$(echo "$KV_URI" | sed 's|https://||' | sed 's|\.vault\.azure\.net.*||')
+                  # Buscar valor do Key Vault
+                  az keyvault secret show --vault-name "$VAULT_NAME" --name "$SECRET_NAME" --query "value" -o tsv 2>/dev/null && return
+                fi
+              else
+                # Valor direto do App Config
+                echo "$KV_REF" | jq -r '.value // ""' 2>/dev/null && return
+              fi
+            fi
+            
+            # Fallback para GitHub Secret
             echo "$secret_fallback"
           }
           
@@ -88,8 +111,31 @@ jobs:
           get_config_value() {
             local key=$1
             local secret_fallback=$2
-            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" --query "value" -o tsv 2>/dev/null || \
-            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --query "value" -o tsv 2>/dev/null || \
+            
+            # Tentar ler do App Config
+            KV_REF=$(az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" -o json 2>/dev/null || \
+                     az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" -o json 2>/dev/null)
+            
+            if [ -n "$KV_REF" ]; then
+              # Verificar se é referência do Key Vault
+              CONTENT_TYPE=$(echo "$KV_REF" | jq -r '.contentType // ""' 2>/dev/null)
+              if [[ "$CONTENT_TYPE" == *"keyvaultref"* ]]; then
+                # É referência do Key Vault, extrair URI e buscar o valor
+                KV_URI=$(echo "$KV_REF" | jq -r '.value.uri // .value // ""' 2>/dev/null)
+                if [ -n "$KV_URI" ]; then
+                  # Extrair nome do secret da URI (última parte após /secrets/)
+                  SECRET_NAME=$(echo "$KV_URI" | sed 's|.*/secrets/||' | sed 's|/.*||')
+                  VAULT_NAME=$(echo "$KV_URI" | sed 's|https://||' | sed 's|\.vault\.azure\.net.*||')
+                  # Buscar valor do Key Vault
+                  az keyvault secret show --vault-name "$VAULT_NAME" --name "$SECRET_NAME" --query "value" -o tsv 2>/dev/null && return
+                fi
+              else
+                # Valor direto do App Config
+                echo "$KV_REF" | jq -r '.value // ""' 2>/dev/null && return
+              fi
+            fi
+            
+            # Fallback para GitHub Secret
             echo "$secret_fallback"
           }
           
@@ -133,7 +179,7 @@ jobs:
           echo "AZURE_CLIENT_OBJECT_ID_HML2=$AZURE_CLIENT_OBJECT_ID_HML2" >> $GITHUB_ENV
           echo "AZURE_PATH_PROVIDERS=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers" >> $GITHUB_ENV
           echo "CONTAINER_APP_SOURCE_ID=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers/Microsoft.App/containerApps/${{ github.event.repository.name }}-hml2" >> $GITHUB_ENV
-
+          
       - name: Configure Azure CLI
         run: |
           az acr login --name ${{ env.ACR_NAME_HML2 }}
@@ -196,7 +242,7 @@ jobs:
             --image ${{ env.ACR_NAME_HML2 }}.azurecr.io/${{ github.event.repository.name }}:${{ github.sha }} \
             --min-replicas 1 \
             --set-env-vars "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380"
-
+  
       - name: Assign managed identity
         run: |
           az containerapp identity assign \
@@ -282,8 +328,8 @@ jobs:
                   echo "⚠️  Connection $conn_name exists but was created without --service-principal"
                   echo "   Deleting to recreate with --service-principal..."
                   az containerapp connection delete \
-                    --name "$CONTAINER_APP_NAME" \
-                    --resource-group "$RG_NAME" \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RG_NAME" \
                     --connection "$conn_name" \
                     --yes 2>/dev/null || true
                   sleep 5
@@ -319,8 +365,8 @@ jobs:
                   --client-type "$client_type" \
                   --service-principal client-id="$AZURE_CLIENT_ID" secret="$AZURE_CLIENT_SECRET" \
                   $extra_args 2>&1
-              fi
-            else
+            fi
+          else
               # Fallback: criar sem service-principal
               az containerapp connection create $conn_type \
                 --target-id "$target_id" \
@@ -381,7 +427,7 @@ jobs:
           az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --set-env-vars \
             POSTGRES_HOST="$POSTGRES_HOST" POSTGRES_PORT="5432" POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
             POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" POSTGRES_SSLMODE="require" \
-            --output none
+              --output none
           
           # Web PubSub
           create_connection "webpubsub" "arcs_pubsub" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.SignalRService/WebPubSub/${{ env.ARCS_PUBSUB_HML2 }}" "python"
@@ -411,8 +457,31 @@ jobs:
           get_config_value() {
             local key=$1
             local secret_fallback=$2
-            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" --query "value" -o tsv 2>/dev/null || \
-            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --query "value" -o tsv 2>/dev/null || \
+            
+            # Tentar ler do App Config
+            KV_REF=$(az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" -o json 2>/dev/null || \
+                     az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" -o json 2>/dev/null)
+            
+            if [ -n "$KV_REF" ]; then
+              # Verificar se é referência do Key Vault
+              CONTENT_TYPE=$(echo "$KV_REF" | jq -r '.contentType // ""' 2>/dev/null)
+              if [[ "$CONTENT_TYPE" == *"keyvaultref"* ]]; then
+                # É referência do Key Vault, extrair URI e buscar o valor
+                KV_URI=$(echo "$KV_REF" | jq -r '.value.uri // .value // ""' 2>/dev/null)
+                if [ -n "$KV_URI" ]; then
+                  # Extrair nome do secret da URI (última parte após /secrets/)
+                  SECRET_NAME=$(echo "$KV_URI" | sed 's|.*/secrets/||' | sed 's|/.*||')
+                  VAULT_NAME=$(echo "$KV_URI" | sed 's|https://||' | sed 's|\.vault\.azure\.net.*||')
+                  # Buscar valor do Key Vault
+                  az keyvault secret show --vault-name "$VAULT_NAME" --name "$SECRET_NAME" --query "value" -o tsv 2>/dev/null && return
+                fi
+              else
+                # Valor direto do App Config
+                echo "$KV_REF" | jq -r '.value // ""' 2>/dev/null && return
+              fi
+            fi
+            
+            # Fallback para GitHub Secret
             echo "$secret_fallback"
           }
           
@@ -441,7 +510,7 @@ jobs:
           echo "microservice_url=https://$FQDN" >> $GITHUB_ENV
           echo "MICROSERVICE_INTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
           echo "ARCS_SERVICE_INTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
-
+      
       - name: Update Container App env vars
         run: |
           # Carregar variáveis do App Config
