@@ -284,10 +284,6 @@ jobs:
             # Se service principal está disponível, usar --service-principal
             if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CLIENT_SECRET" ]; then
               if [ "$conn_type" == "postgres-flexible" ] && [ -n "$AZURE_CLIENT_OBJECT_ID" ]; then
-                # Para PostgreSQL, adicionar --yes se não estiver nos extra_args
-                if [[ "$extra_args" != *"--yes"* ]]; then
-                  extra_args="$extra_args --yes"
-                fi
                 az containerapp connection create $conn_type \
                   --target-id "$target_id" \
                   --source-id "$CONTAINER_APP_SOURCE_ID" \
@@ -333,7 +329,21 @@ jobs:
             az postgres flexible-server db create --resource-group "$RG_NAME" --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" --database-name "${{ env.POSTGRES_DB_HML2 }}"
           fi
           
-          create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python" "--yes"
+          # Tentar criar conexão com password se disponível, caso contrário sem password
+          PG_PASSWORD="${{ env.POSTGRES_PASSWORD_HML2 }}"
+          if [ -n "$PG_PASSWORD" ]; then
+            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python" "--secret name=password secret=\"$PG_PASSWORD\"" || \
+            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
+          else
+            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
+          fi
+          
+          # Configurar variáveis de ambiente do PostgreSQL
+          POSTGRES_HOST="${{ env.ARCS_POSTGRES_SERVER_HML2 }}.postgres.database.azure.com"
+          az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --set-env-vars \
+            POSTGRES_HOST="$POSTGRES_HOST" POSTGRES_PORT="5432" POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
+            POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" POSTGRES_SSLMODE="require" \
+            --output none
           
           # Web PubSub
           create_connection "webpubsub" "arcs_pubsub" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.SignalRService/WebPubSub/${{ env.ARCS_PUBSUB_HML2 }}" "python"
