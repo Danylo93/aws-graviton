@@ -253,7 +253,6 @@ jobs:
             --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --image ${{ env.ACR_NAME_HML2 }}.azurecr.io/${{ github.event.repository.name }}:${{ github.sha }} \
             --min-replicas 1 \
-            --workload-profile-name hm12 \
             --set-env-vars "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380"
           
           echo "✅ Container App updated"
@@ -469,7 +468,6 @@ jobs:
           az containerapp update \
             --name ${{ env.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --workload-profile-name hm12 \
             --set-env-vars \
               "MICROSERVICE_INTERNAL_URL=${{ env.MICROSERVICE_INTERNAL_URL }}" \
               "ARCS_SERVICE_INTERNAL_URL=${{ env.ARCS_SERVICE_INTERNAL_URL }}" \
