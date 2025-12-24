@@ -109,6 +109,9 @@ jobs:
           REDIS_PASSWORD_HML2=$(get_config_value "REDIS_PASSWORD_HML2" "${{ secrets.REDIS_PASSWORD_HML2 }}")
           APIM_NAME_HML2=$(get_config_value "APIM_NAME_HML2" "${{ secrets.APIM_NAME_HML2 }}")
           AZURE_MANAGED_IDENTITY_NAME_HML2=$(get_config_value "AZURE_MANAGED_IDENTITY_NAME_HML2" "${{ secrets.AZURE_MANAGED_IDENTITY_NAME_HML2 }}")
+          AZURE_CLIENT_ID_HML2=$(get_config_value "AZURE_CLIENT_ID_HML2" "${{ secrets.AZURE_CLIENT_ID_HML2 }}")
+          AZURE_CLIENT_SECRET_HML2=$(get_config_value "AZURE_CLIENT_SECRET_HML2" "${{ secrets.AZURE_CLIENT_SECRET_HML2 }}")
+          AZURE_CLIENT_OBJECT_ID_HML2=$(get_config_value "AZURE_CLIENT_OBJECT_ID_HML2" "${{ secrets.AZURE_CLIENT_OBJECT_ID_HML2 }}")
           
           echo "AZURE_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID" >> $GITHUB_ENV
           echo "RG_NAME_ARCS_HML2=$RG_NAME_ARCS_HML2" >> $GITHUB_ENV
@@ -125,6 +128,9 @@ jobs:
           echo "REDIS_PASSWORD_HML2=$REDIS_PASSWORD_HML2" >> $GITHUB_ENV
           echo "APIM_NAME_HML2=$APIM_NAME_HML2" >> $GITHUB_ENV
           echo "AZURE_MANAGED_IDENTITY_NAME_HML2=$AZURE_MANAGED_IDENTITY_NAME_HML2" >> $GITHUB_ENV
+          echo "AZURE_CLIENT_ID_HML2=$AZURE_CLIENT_ID_HML2" >> $GITHUB_ENV
+          echo "AZURE_CLIENT_SECRET_HML2=$AZURE_CLIENT_SECRET_HML2" >> $GITHUB_ENV
+          echo "AZURE_CLIENT_OBJECT_ID_HML2=$AZURE_CLIENT_OBJECT_ID_HML2" >> $GITHUB_ENV
           echo "AZURE_PATH_PROVIDERS=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers" >> $GITHUB_ENV
           echo "CONTAINER_APP_SOURCE_ID=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers/Microsoft.App/containerApps/${{ github.event.repository.name }}-hml2" >> $GITHUB_ENV
 
@@ -222,10 +228,10 @@ jobs:
           CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
           CONTAINER_APP_SOURCE_ID="${{ env.CONTAINER_APP_SOURCE_ID }}"
           
-          # Carregar secrets do service principal (se disponíveis)
-          AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID_HML2 }}"
-          AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET_HML2 }}"
-          AZURE_CLIENT_OBJECT_ID="${{ secrets.AZURE_CLIENT_OBJECT_ID_HML2 }}"
+          # Carregar secrets do service principal do App Config
+          AZURE_CLIENT_ID="${{ env.AZURE_CLIENT_ID_HML2 }}"
+          AZURE_CLIENT_SECRET="${{ env.AZURE_CLIENT_SECRET_HML2 }}"
+          AZURE_CLIENT_OBJECT_ID="${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }}"
           
           create_connection() {
             local conn_type=$1
@@ -331,9 +337,11 @@ jobs:
           fi
           
           # Criar conexão PostgreSQL igual ao HML (com --yes e service-principal com object-id)
-          if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CLIENT_SECRET" ] && [ -n "$AZURE_CLIENT_OBJECT_ID" ]; then
-            if ! az containerapp connection show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --connection "$CONNECTION_NAME" --output none 2>/dev/null; then
-              echo "🔗 Creating PostgreSQL connection $CONNECTION_NAME..."
+          if ! az containerapp connection show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --connection "$CONNECTION_NAME" --output none 2>/dev/null; then
+            echo "🔗 Creating PostgreSQL connection $CONNECTION_NAME..."
+            
+            if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CLIENT_SECRET" ] && [ -n "$AZURE_CLIENT_OBJECT_ID" ]; then
+              # Criar com service principal (preferencial)
               az containerapp connection create postgres-flexible \
                 --target-id "$PG_TARGET" \
                 --source-id "$CONTAINER_APP_SOURCE_ID" \
@@ -343,10 +351,18 @@ jobs:
                 --service-principal client-id="$AZURE_CLIENT_ID" object-id="$AZURE_CLIENT_OBJECT_ID" secret="$AZURE_CLIENT_SECRET" \
                 --yes
             else
-              echo "✅ PostgreSQL connection $CONNECTION_NAME already exists"
+              # Fallback: criar sem service principal (usando managed identity)
+              echo "⚠️  Service principal credentials not available, creating with managed identity..."
+              az containerapp connection create postgres-flexible \
+                --target-id "$PG_TARGET" \
+                --source-id "$CONTAINER_APP_SOURCE_ID" \
+                --container "$CONTAINER_APP_NAME" \
+                --connection "$CONNECTION_NAME" \
+                --client-type python \
+                --yes
             fi
           else
-            echo "⚠️  Service principal credentials not available, skipping PostgreSQL connection"
+            echo "✅ PostgreSQL connection $CONNECTION_NAME already exists"
           fi
           
           # Configurar variáveis de ambiente do PostgreSQL
