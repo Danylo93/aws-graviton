@@ -134,6 +134,7 @@ jobs:
           az account set -s ${{ env.AZURE_SUBSCRIPTION_ID }}
           az configure --defaults group=${{ env.RG_NAME_ARCS_HML2 }}
           az extension add --name containerapp --upgrade
+          az extension add --name serviceconnector-passwordless --upgrade
 
       - name: Verify prerequisites
         run: |
