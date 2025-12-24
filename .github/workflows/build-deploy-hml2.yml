@@ -1,10 +1,8 @@
 name: Build, Deploy and Settings
 
-# Trigger conditions
 on:
   push:
-    branches:
-      [ hml2 ]
+    branches: [ hml2 ]
     paths:
       - '**'
       - '.github/workflows/build-deploy-hml2.yml'
@@ -13,15 +11,8 @@ on:
     types: [deploy-hml2]
 
 env:
-  AZURE_PATH_PROVIDERS: /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ secrets.RG_NAME_ARCS_HML2 }}/providers
   CONTAINER_APP_NAME: "${{ github.event.repository.name }}-hml2"
-  CONTAINER_APP_SOURCE_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ secrets.RG_NAME_ARCS_HML2 }}/providers/Microsoft.App/containerApps/${{ github.event.repository.name }}-hml2"
   CONTAINER_PORT: 8000
-  # URLs provisórias para o .env (serão atualizadas dinamicamente quando o FQDN for obtido)
-  MICROSERVICE_INTERNAL_URL: https://${{ github.event.repository.name }}-hml2.placeholder.eastus2.azurecontainerapps.io
-  ARCS_SERVICE_INTERNAL_URL: https://arcs-service-hml2.ashyground-8b528dd4.eastus2.azurecontainerapps.io
-  MICROSERVICE_EXTERNAL_URL: https://arcs-apim-hml2.azure-api.net${{vars.APIM_API_ROUTE_PATH}}
-  ARCS_SERVICE_EXTERNAL_URL: https://arcs-apim-hml2.azure-api.net/arcs
 
 jobs:
   build:
@@ -32,7 +23,7 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout to the branch
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Azure Login
@@ -40,8 +31,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS_HML2 }}
 
-      - name: Load values from App Configuration
-        id: load_config
+      - name: Load App Configuration
         run: |
           APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
           
@@ -53,26 +43,18 @@ jobs:
             echo "$secret_fallback"
           }
           
-          ACR_NAME_HML2=$(get_config_value "ACR_NAME_HML2" "${{ secrets.ACR_NAME_HML2 }}")
-          AZURE_SUBSCRIPTION_ID=$(get_config_value "AZURE_SUBSCRIPTION_ID_HML2" "${{ secrets.AZURE_SUBSCRIPTION_ID }}")
-          RG_NAME_ARCS_HML2=$(get_config_value "RG_NAME_ARCS_HML2" "${{ secrets.RG_NAME_ARCS_HML2 }}")
-          
-          echo "ACR_NAME_HML2=$ACR_NAME_HML2" >> $GITHUB_ENV
-          echo "AZURE_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID" >> $GITHUB_ENV
-          echo "RG_NAME_ARCS_HML2=$RG_NAME_ARCS_HML2" >> $GITHUB_ENV
-          echo "AZURE_PATH_PROVIDERS=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers" >> $GITHUB_ENV
-          echo "CONTAINER_APP_SOURCE_ID=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers/Microsoft.App/containerApps/${{ github.event.repository.name }}-hml2" >> $GITHUB_ENV
+          echo "ACR_NAME_HML2=$(get_config_value "ACR_NAME_HML2" "${{ secrets.ACR_NAME_HML2 }}")" >> $GITHUB_ENV
+          echo "AZURE_SUBSCRIPTION_ID=$(get_config_value "AZURE_SUBSCRIPTION_ID_HML2" "${{ secrets.AZURE_SUBSCRIPTION_ID }}")" >> $GITHUB_ENV
+          echo "RG_NAME_ARCS_HML2=$(get_config_value "RG_NAME_ARCS_HML2" "${{ secrets.RG_NAME_ARCS_HML2 }}")" >> $GITHUB_ENV
 
-      - name: Login to ACR and configure az
+      - name: Configure Azure CLI
         run: |
           az acr login --name ${{ env.ACR_NAME_HML2 }}
           az account set -s ${{ env.AZURE_SUBSCRIPTION_ID }}
           az configure --defaults group=${{ env.RG_NAME_ARCS_HML2 }}
       
-      - name: Generate .env File of secrets and vars
-        id: generate_env_file
+      - name: Generate .env File
         env:
-          GITHUB_WORKSPACE: ${{ github.workspace }}
           REMOVE_SUFIX: _HML
         run: |
           source ./infra/arcs.sh
@@ -80,7 +62,7 @@ jobs:
           convert_json_to_env '${{ toJSON(vars) }}'
           convert_json_to_env '${{ toJSON(env) }}'
       
-      - name: Build and push container image to registry
+      - name: Build and push image
         run: |
           docker build \
             --build-arg TOKEN_PKG_LIB_GITHUB=${{ secrets.TOKEN_PKG_LIB_GITHUB }} \
@@ -98,8 +80,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS_HML2 }}
 
-      - name: Load all values from App Configuration
-        id: load_all_config
+      - name: Load App Configuration
         run: |
           APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
           MS_NAME="${{ github.event.repository.name }}"
@@ -112,7 +93,6 @@ jobs:
             echo "$secret_fallback"
           }
           
-          # Carregar todos os valores
           AZURE_SUBSCRIPTION_ID=$(get_config_value "AZURE_SUBSCRIPTION_ID_HML2" "${{ secrets.AZURE_SUBSCRIPTION_ID }}")
           RG_NAME_ARCS_HML2=$(get_config_value "RG_NAME_ARCS_HML2" "${{ secrets.RG_NAME_ARCS_HML2 }}")
           ARCS_ENV_APP_HML2=$(get_config_value "ARCS_ENV_APP_HML2" "${{ secrets.ARCS_ENV_APP_HML2 }}")
@@ -129,10 +109,7 @@ jobs:
           REDIS_PASSWORD_HML2=$(get_config_value "REDIS_PASSWORD_HML2" "${{ secrets.REDIS_PASSWORD_HML2 }}")
           APIM_NAME_HML2=$(get_config_value "APIM_NAME_HML2" "${{ secrets.APIM_NAME_HML2 }}")
           AZURE_MANAGED_IDENTITY_NAME_HML2=$(get_config_value "AZURE_MANAGED_IDENTITY_NAME_HML2" "${{ secrets.AZURE_MANAGED_IDENTITY_NAME_HML2 }}")
-          AZURE_CLIENT_ID_HML=$(get_config_value "AZURE_CLIENT_ID_HML" "${{ secrets.AZURE_CLIENT_ID_HML }}")
-          AZURE_CLIENT_SECRET_HML=$(get_config_value "AZURE_CLIENT_SECRET_HML" "${{ secrets.AZURE_CLIENT_SECRET_HML }}")
           
-          # Exportar como variáveis de ambiente
           echo "AZURE_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID" >> $GITHUB_ENV
           echo "RG_NAME_ARCS_HML2=$RG_NAME_ARCS_HML2" >> $GITHUB_ENV
           echo "ARCS_ENV_APP_HML2=$ARCS_ENV_APP_HML2" >> $GITHUB_ENV
@@ -148,14 +125,10 @@ jobs:
           echo "REDIS_PASSWORD_HML2=$REDIS_PASSWORD_HML2" >> $GITHUB_ENV
           echo "APIM_NAME_HML2=$APIM_NAME_HML2" >> $GITHUB_ENV
           echo "AZURE_MANAGED_IDENTITY_NAME_HML2=$AZURE_MANAGED_IDENTITY_NAME_HML2" >> $GITHUB_ENV
-          echo "AZURE_CLIENT_ID_HML=$AZURE_CLIENT_ID_HML" >> $GITHUB_ENV
-          echo "AZURE_CLIENT_SECRET_HML=$AZURE_CLIENT_SECRET_HML" >> $GITHUB_ENV
           echo "AZURE_PATH_PROVIDERS=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers" >> $GITHUB_ENV
           echo "CONTAINER_APP_SOURCE_ID=/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RG_NAME_ARCS_HML2/providers/Microsoft.App/containerApps/${{ github.event.repository.name }}-hml2" >> $GITHUB_ENV
-          
-          echo "✅ Valores carregados do App Configuration"
 
-      - name: Set subscription and group default
+      - name: Configure Azure CLI
         run: |
           az acr login --name ${{ env.ACR_NAME_HML2 }}
           az account set -s ${{ env.AZURE_SUBSCRIPTION_ID }}
@@ -164,50 +137,25 @@ jobs:
 
       - name: Verify prerequisites
         run: |
-          echo "=========================================="
-          echo "🔍 VERIFYING PREREQUISITES"
-          echo "=========================================="
-          
-          # Verificar Container App
           if az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'properties.provisioningState' -o tsv 2>/dev/null; then
-            echo "✅ Container App exists"
             echo "aca_exists=true" >> $GITHUB_ENV
           else
-            echo "ℹ️  Container App does not exist (will be created)"
             echo "aca_exists=false" >> $GITHUB_ENV
           fi
           
-          # Verificar Redis
-          if az redis show --name redis-arcs-porschecup-hml2 --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'provisioningState' -o tsv 2>/dev/null; then
-            echo "✅ Redis Cache exists"
-            echo "redis_exists=true" >> $GITHUB_ENV
-          else
-            echo "❌ ERROR: Redis Cache does not exist"
-            echo "redis_exists=false" >> $GITHUB_ENV
+          if ! az redis show --name redis-arcs-porschecup-hml2 --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'provisioningState' -o tsv 2>/dev/null; then
+            echo "❌ Redis Cache does not exist"
             exit 1
           fi
           
-          # Verificar Managed Identity
-          IDENTITY_NAME="${{ env.AZURE_MANAGED_IDENTITY_NAME_HML2 }}"
-          if az identity show --name "$IDENTITY_NAME" --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'name' -o tsv 2>/dev/null; then
-            echo "✅ Managed Identity exists: $IDENTITY_NAME"
-            echo "identity_exists=true" >> $GITHUB_ENV
-          else
-            echo "❌ ERROR: Managed Identity '$IDENTITY_NAME' NOT FOUND"
-            az identity list --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "[].name" -o table || echo "Could not list identities"
-            echo "identity_exists=false" >> $GITHUB_ENV
+          if ! az identity show --name "${{ env.AZURE_MANAGED_IDENTITY_NAME_HML2 }}" --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'name' -o tsv 2>/dev/null; then
+            echo "❌ Managed Identity '${{ env.AZURE_MANAGED_IDENTITY_NAME_HML2 }}' NOT FOUND"
             exit 1
           fi
-          
-          echo "=========================================="
 
       - name: Create Container App
         if: env.aca_exists == 'false'
         run: |
-          echo "=========================================="
-          echo "🚀 Creating Container App (temporary external ingress)"
-          echo "=========================================="
-          
           az containerapp create \
             --name ${{ env.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
@@ -221,31 +169,18 @@ jobs:
             --target-port ${{ env.CONTAINER_PORT }} \
             --min-replicas 1 \
             --env-vars "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380" "MICROSERVICE_PORT=8000"
-          
-          echo "✅ Container App created"
-          echo "ingress_was_internal=false" >> $GITHUB_ENV
       
       - name: Update Container App
         if: env.aca_exists == 'true'
         run: |
-          echo "=========================================="
-          echo "🔄 Updating Container App"
-          echo "=========================================="
-          
-          # Garantir ingress external temporariamente
           CURRENT_INGRESS=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.configuration.ingress.external" -o tsv 2>/dev/null || echo "false")
           
           if [ "$CURRENT_INGRESS" != "true" ]; then
-            echo "⚠️  Setting ingress to external (temporary)..."
             az containerapp ingress enable \
               --name ${{ env.CONTAINER_APP_NAME }} \
               --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
               --type external \
               --target-port ${{ env.CONTAINER_PORT }}
-            echo "ingress_was_internal=true" >> $GITHUB_ENV
-          else
-            echo "✅ Ingress already external"
-            echo "ingress_was_internal=false" >> $GITHUB_ENV
           fi
           
           az containerapp update \
@@ -254,62 +189,38 @@ jobs:
             --image ${{ env.ACR_NAME_HML2 }}.azurecr.io/${{ github.event.repository.name }}:${{ github.sha }} \
             --min-replicas 1 \
             --set-env-vars "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380"
-          
-          echo "✅ Container App updated"
 
-      - name: Assign managed identity to Container App
+      - name: Assign managed identity
         run: |
           az containerapp identity assign \
             --name ${{ env.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --user-assigned ${{ env.AZURE_PATH_PROVIDERS }}/Microsoft.ManagedIdentity/userAssignedIdentities/${{ env.AZURE_MANAGED_IDENTITY_NAME_HML2 }}
 
-      - name: Validate Container App status
+      - name: Wait for Container App ready
         run: |
-          echo "=========================================="
-          echo "⏳ Validating Container App status"
-          echo "=========================================="
-          
-          MAX_ATTEMPTS=10
-          SLEEP_INTERVAL=15
-          ATTEMPTS=0
-      
-          while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+          for i in {1..10}; do
             STATUS=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query 'properties.provisioningState' -o tsv 2>/dev/null || echo "Unknown")
-      
             if [ "$STATUS" == "Succeeded" ]; then
-              echo "✅ Container App is running (Status: $STATUS)"
               break
-            elif [ "$STATUS" == "InProgress" ]; then
-              ATTEMPTS=$((ATTEMPTS+1))
-              echo "⏳ Attempt $ATTEMPTS/$MAX_ATTEMPTS: Status is $STATUS. Waiting ${SLEEP_INTERVAL}s..."
-              sleep $SLEEP_INTERVAL
-            else
-              echo "❌ Container App status: $STATUS"
-              echo "Fetching logs..."
-              az containerapp logs show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --tail 100
-              exit 1
             fi
+            sleep 15
           done
-      
+          
           if [ "$STATUS" != "Succeeded" ]; then
-            echo "❌ Container App failed to reach 'Succeeded' status after $MAX_ATTEMPTS attempts"
+            echo "❌ Container App failed to reach 'Succeeded' status"
+            az containerapp logs show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --tail 100
             exit 1
           fi
 
       - name: Setup managed connections
         run: |
           set +e
-          echo "=========================================="
-          echo "🔗 Setting up managed connections"
-          echo "=========================================="
-          
           SUB_ID="${{ env.AZURE_SUBSCRIPTION_ID }}"
           RG_NAME="${{ env.RG_NAME_ARCS_HML2 }}"
           CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
           CONTAINER_APP_SOURCE_ID="${{ env.CONTAINER_APP_SOURCE_ID }}"
           
-          # Helper function to create connection
           create_connection() {
             local conn_type=$1
             local conn_name=$2
@@ -317,68 +228,32 @@ jobs:
             local client_type=${4:-python}
             local extra_args=${5:-}
             
-            if az containerapp connection show \
-              --name "$CONTAINER_APP_NAME" \
-              --resource-group "$RG_NAME" \
-              --connection "$conn_name" \
-              --output none 2>/dev/null; then
-              echo "✅ Connection '$conn_name' already exists"
+            if az containerapp connection show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --connection "$conn_name" --output none 2>/dev/null; then
               return 0
             fi
             
-            echo "Creating $conn_type connection: $conn_name..."
-            ERROR_OUTPUT=$(az containerapp connection create $conn_type \
+            az containerapp connection create $conn_type \
               --target-id "$target_id" \
               --source-id "$CONTAINER_APP_SOURCE_ID" \
               --container "$CONTAINER_APP_NAME" \
               --connection "$conn_name" \
               --client-type "$client_type" \
-              $extra_args 2>&1)
-            CREATE_EXIT=$?
-            
-            if [ $CREATE_EXIT -eq 0 ]; then
-              echo "✅ Connection '$conn_name' created"
-              return 0
-            else
-              echo "⚠️  Failed to create connection '$conn_name': $ERROR_OUTPUT"
-              return 1
-            fi
+              $extra_args 2>&1
           }
           
-          # Storage Blob
-          STORAGE_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/${{ env.STORAGE_NAME_HML2 }}/blobServices/default"
-          create_connection "storage-blob" "arcsstorage" "$STORAGE_TARGET" "python" "--container $CONTAINER_APP_NAME"
+          create_connection "storage-blob" "arcsstorage" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/${{ env.STORAGE_NAME_HML2 }}/blobServices/default" "python" "--container $CONTAINER_APP_NAME"
+          create_connection "keyvault" "arcs_kv" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.KeyVault/vaults/${{ env.ARCS_KV_NAME_HML2 }}"
+          create_connection "redis" "arcsredis" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Cache/redis/redis-arcs-porschecup-hml2"
+          create_connection "webpubsub" "arcs_pubsub" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.SignalRService/WebPubSub/${{ env.ARCS_PUBSUB_HML2 }}"
           
-          # Key Vault
-          KV_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.KeyVault/vaults/${{ env.ARCS_KV_NAME_HML2 }}"
-          create_connection "keyvault" "arcs_kv" "$KV_TARGET"
-          
-          # Redis
-          REDIS_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Cache/redis/redis-arcs-porschecup-hml2"
-          create_connection "redis" "arcsredis" "$REDIS_TARGET"
-          
-          # Web PubSub
-          WPS_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.SignalRService/WebPubSub/${{ env.ARCS_PUBSUB_HML2 }}"
-          create_connection "webpubsub" "arcs_pubsub" "$WPS_TARGET"
-          
-          # PostgreSQL (with password if available)
+          # PostgreSQL
           PG_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/${{ env.ARCS_POSTGRES_SERVER_HML2 }}/databases/${{ env.POSTGRES_DB_HML2 }}"
           CONNECTION_NAME="user_${{ env.POSTGRES_DB_HML2 }}"
           
-          # Verify database exists
-          if ! az postgres flexible-server db show \
-            --resource-group "$RG_NAME" \
-            --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" \
-            --database-name "${{ env.POSTGRES_DB_HML2 }}" \
-            --output none 2>/dev/null; then
-            echo "Creating database ${{ env.POSTGRES_DB_HML2 }}..."
-            az postgres flexible-server db create \
-              --resource-group "$RG_NAME" \
-              --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" \
-              --database-name "${{ env.POSTGRES_DB_HML2 }}"
+          if ! az postgres flexible-server db show --resource-group "$RG_NAME" --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" --database-name "${{ env.POSTGRES_DB_HML2 }}" --output none 2>/dev/null; then
+            az postgres flexible-server db create --resource-group "$RG_NAME" --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" --database-name "${{ env.POSTGRES_DB_HML2 }}"
           fi
           
-          # Try with password first
           PG_PASSWORD="${{ env.POSTGRES_PASSWORD_HML2 }}"
           if [ -n "$PG_PASSWORD" ]; then
             create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python" "--secret name=password secret=\"$PG_PASSWORD\"" || \
@@ -387,20 +262,11 @@ jobs:
             create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
           fi
           
-          # Configure PostgreSQL env vars
           POSTGRES_HOST="${{ env.ARCS_POSTGRES_SERVER_HML2 }}.postgres.database.azure.com"
-          az containerapp update \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$RG_NAME" \
-            --set-env-vars \
-              POSTGRES_HOST="$POSTGRES_HOST" \
-              POSTGRES_PORT="5432" \
-              POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
-              POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" \
-              POSTGRES_SSLMODE="require" \
+          az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --set-env-vars \
+            POSTGRES_HOST="$POSTGRES_HOST" POSTGRES_PORT="5432" POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
+            POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" POSTGRES_SSLMODE="require" \
             --output none
-          
-          echo "✅ Managed connections setup completed"
           set -e
       
   settings:
@@ -408,7 +274,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: HML2
     steps:
-      - name: Checkout to the branch
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Azure Login
@@ -416,7 +282,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS_HML2 }}
 
-      - name: Load values from App Configuration
+      - name: Load App Configuration
         run: |
           APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
           
@@ -428,364 +294,124 @@ jobs:
             echo "$secret_fallback"
           }
           
-          AZURE_SUBSCRIPTION_ID=$(get_config_value "AZURE_SUBSCRIPTION_ID_HML2" "${{ secrets.AZURE_SUBSCRIPTION_ID }}")
-          RG_NAME_ARCS_HML2=$(get_config_value "RG_NAME_ARCS_HML2" "${{ secrets.RG_NAME_ARCS_HML2 }}")
-          APIM_NAME_HML2=$(get_config_value "APIM_NAME_HML2" "${{ secrets.APIM_NAME_HML2 }}")
-          
-          echo "AZURE_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID" >> $GITHUB_ENV
-          echo "RG_NAME_ARCS_HML2=$RG_NAME_ARCS_HML2" >> $GITHUB_ENV
-          echo "APIM_NAME_HML2=$APIM_NAME_HML2" >> $GITHUB_ENV
+          echo "AZURE_SUBSCRIPTION_ID=$(get_config_value "AZURE_SUBSCRIPTION_ID_HML2" "${{ secrets.AZURE_SUBSCRIPTION_ID }}")" >> $GITHUB_ENV
+          echo "RG_NAME_ARCS_HML2=$(get_config_value "RG_NAME_ARCS_HML2" "${{ secrets.RG_NAME_ARCS_HML2 }}")" >> $GITHUB_ENV
+          echo "ARCS_ENV_APP_HML2=$(get_config_value "ARCS_ENV_APP_HML2" "${{ secrets.ARCS_ENV_APP_HML2 }}")" >> $GITHUB_ENV
+          echo "APIM_NAME_HML2=$(get_config_value "APIM_NAME_HML2" "${{ secrets.APIM_NAME_HML2 }}")" >> $GITHUB_ENV
+          echo "REDIS_PASSWORD_HML2=$(get_config_value "REDIS_PASSWORD_HML2" "${{ secrets.REDIS_PASSWORD_HML2 }}")" >> $GITHUB_ENV
 
-      - name: Set subscription and group default
+      - name: Configure Azure CLI
         run: |
           az account set -s ${{ env.AZURE_SUBSCRIPTION_ID }}
           az configure --defaults group=${{ env.RG_NAME_ARCS_HML2 }}
           az extension add --name containerapp --upgrade
-          az extension add --name apim --upgrade || echo "APIM extension already installed"
+          az extension add --name apim --upgrade || true
 
       - name: Get Container App FQDN
-        id: get_fqdn
         run: |
-          FQDN=$(az containerapp show \
-            --name ${{ env.CONTAINER_APP_NAME }} \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --query "properties.configuration.ingress.fqdn" -o tsv)
+          FQDN=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.configuration.ingress.fqdn" -o tsv)
           
           if [ -z "$FQDN" ]; then
-            echo "❌ ERROR: Could not retrieve FQDN for container app ${{ env.CONTAINER_APP_NAME }}"
+            echo "❌ Could not retrieve FQDN"
             exit 1
           fi
           
-          echo "Container App FQDN: $FQDN"
-          echo "microservice_fqdn=$FQDN" >> $GITHUB_ENV
           echo "microservice_url=https://$FQDN" >> $GITHUB_ENV
           echo "MICROSERVICE_INTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
           echo "ARCS_SERVICE_INTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
-          echo "arcs_service_url=https://$FQDN" >> $GITHUB_ENV
 
-      - name: Update Container App environment variables
+      - name: Update Container App env vars
         run: |
-          az containerapp update \
-            --name ${{ env.CONTAINER_APP_NAME }} \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --set-env-vars \
-              "MICROSERVICE_INTERNAL_URL=${{ env.MICROSERVICE_INTERNAL_URL }}" \
-              "ARCS_SERVICE_INTERNAL_URL=${{ env.ARCS_SERVICE_INTERNAL_URL }}" \
-              "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" \
-              "REDIS_PORT=6379" \
-              "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" \
-              "REDIS_SSL_PORT=6380"
+          az containerapp update --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --set-env-vars "MICROSERVICE_INTERNAL_URL=${{ env.MICROSERVICE_INTERNAL_URL }}" \
+            "ARCS_SERVICE_INTERNAL_URL=${{ env.ARCS_SERVICE_INTERNAL_URL }}" \
+            "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" \
+            "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380"
       
-      - name: Execute post_boot with retries
+      - name: Execute post_boot
         run: |
-          echo "=========================================="
-          echo "🚀 Executing post_boot endpoint"
-          echo "=========================================="
-          
-          # Wait for Container App to be ready
-          MAX_WAIT=300
-          WAIT_COUNT=0
-          SLEEP_INTERVAL=10
-          
-          while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
-            STATUS=$(az containerapp show \
-              --name ${{ env.CONTAINER_APP_NAME }} \
-              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-              --query "properties.provisioningState" -o tsv 2>/dev/null || echo "Unknown")
-            
-            if [ "$STATUS" == "Succeeded" ]; then
-              echo "✅ Container App is ready"
-              break
-            fi
-            
-            WAIT_COUNT=$((WAIT_COUNT + SLEEP_INTERVAL))
-            echo "⏳ Waiting for Container App... (${WAIT_COUNT}s/${MAX_WAIT}s)"
-            sleep $SLEEP_INTERVAL
+          for i in {1..30}; do
+            STATUS=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.provisioningState" -o tsv 2>/dev/null || echo "Unknown")
+            [ "$STATUS" == "Succeeded" ] && break
+            sleep 10
           done
           
-          # Wait for application to start
-          echo "⏳ Waiting for application to start (60s)..."
           sleep 60
           
-          # Health check with resource validation
-          HEALTH_URL="${{ env.microservice_url }}/lib/health_check"
-          MAX_HEALTH_WAIT=300
-          HEALTH_WAIT_COUNT=0
-          HEALTH_SLEEP=15
-          
-          echo "🔍 Checking health endpoint..."
-          while [ $HEALTH_WAIT_COUNT -lt $MAX_HEALTH_WAIT ]; do
-            HEALTH_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" --max-time 10 --connect-timeout 5 2>/dev/null || echo "000")
-            HEALTH_RESPONSE=$(curl -k -L -s "$HEALTH_URL" --max-time 10 --connect-timeout 5 2>/dev/null || echo "")
-            
+          for i in {1..20}; do
+            HEALTH_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" "${{ env.microservice_url }}/lib/health_check" --max-time 10 --connect-timeout 5 2>/dev/null || echo "000")
             if [ "$HEALTH_CODE" == "200" ]; then
+              HEALTH_RESPONSE=$(curl -k -L -s "${{ env.microservice_url }}/lib/health_check" --max-time 10 --connect-timeout 5 2>/dev/null || echo "")
               POSTGRES_OK=$(echo "$HEALTH_RESPONSE" | grep -o '"postgres":[^,}]*' | grep -o 'true' || echo "")
               REDIS_OK=$(echo "$HEALTH_RESPONSE" | grep -o '"redis":[^,}]*' | grep -o 'true' || echo "")
-              
-              if [ -n "$POSTGRES_OK" ] && [ -n "$REDIS_OK" ]; then
-                echo "✅ Health check OK - All resources ready"
-                break
-              else
-                echo "⏳ Resources not ready yet (PostgreSQL: ${POSTGRES_OK:-false}, Redis: ${REDIS_OK:-false})"
-              fi
-            else
-              echo "⏳ Health check returned HTTP $HEALTH_CODE"
+              [ -n "$POSTGRES_OK" ] && [ -n "$REDIS_OK" ] && break
             fi
-            
-            HEALTH_WAIT_COUNT=$((HEALTH_WAIT_COUNT + HEALTH_SLEEP))
-            sleep $HEALTH_SLEEP
+            sleep 15
           done
           
-          # Execute post_boot with retries
-          MAX_ATTEMPTS=5
-          ATTEMPT=1
-          SUCCESS=false
-          
-          while [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ "$SUCCESS" != "true" ]; do
-            echo "📞 Attempt $ATTEMPT/$MAX_ATTEMPTS: Calling post_boot..."
-            
+          for i in {1..5}; do
             HTTP_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" -X POST "${{ env.microservice_url }}/lib/post_boot" \
               -H "Authorization: TOKEN ${{ secrets.SECRET_ARCS_TOKEN }}" \
               -H "Content-Type: application/json" \
               --data-raw '{}' \
-              --max-time 60 \
-              --connect-timeout 30 \
-              2>/dev/null || echo "000")
+              --max-time 60 --connect-timeout 30 2>/dev/null || echo "000")
             
             if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "201" ]; then
-              SUCCESS=true
-              RESPONSE=$(curl -k -L -s -X POST "${{ env.microservice_url }}/lib/post_boot" \
-                -H "Authorization: TOKEN ${{ secrets.SECRET_ARCS_TOKEN }}" \
-                -H "Content-Type: application/json" \
-                --data-raw '{}' \
-                --max-time 60 \
-                --connect-timeout 30)
               echo "✅ post_boot executed successfully"
-              echo "Response: $RESPONSE"
-            else
-              echo "⚠️  HTTP $HTTP_CODE - Retrying in $((ATTEMPT * 5))s..."
-              sleep $((ATTEMPT * 5))
-              ATTEMPT=$((ATTEMPT + 1))
+              break
             fi
+            sleep $((i * 5))
           done
-          
-          if [ "$SUCCESS" != "true" ]; then
-            echo "⚠️  WARNING: post_boot did not return 200 after $MAX_ATTEMPTS attempts"
-            echo "   Deployment will continue, but post_boot may need manual execution"
-          fi
       
       - name: Change ingress to internal
-        id: change_ingress
         run: |
-          echo "=========================================="
-          echo "🔒 Changing ingress to internal (private)"
-          echo "=========================================="
-          
-          # Check if CAE has VNet Integration
-          CAE_VNET=$(az containerapp env show \
-            --name ${{ env.ARCS_ENV_APP_HML2 }} \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --query "properties.vnetConfiguration.infrastructureSubnetId" -o tsv 2>/dev/null || echo "")
+          CAE_VNET=$(az containerapp env show --name ${{ env.ARCS_ENV_APP_HML2 }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.vnetConfiguration.infrastructureSubnetId" -o tsv 2>/dev/null || echo "")
           
           if [ -z "$CAE_VNET" ]; then
-            echo "⚠️  CAE does not have VNet Integration"
-            echo "   Keeping ingress as external"
-            echo "   To make it private, configure VNet Integration in CAE first"
-            echo "ingress_changed=false" >> $GITHUB_ENV
+            echo "⚠️  CAE does not have VNet Integration - keeping ingress external"
             exit 0
           fi
           
-          echo "✅ CAE has VNet Integration. Changing ingress to internal..."
+          az containerapp ingress enable --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --type internal --target-port ${{ env.CONTAINER_PORT }}
           
-          az containerapp ingress enable \
-            --name ${{ env.CONTAINER_APP_NAME }} \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --type internal \
-            --target-port ${{ env.CONTAINER_PORT }}
-          
-          echo "✅ Ingress changed to internal (private)"
-          echo "   Container App is now only accessible via VNet/APIM"
-          
-          # Wait for FQDN to update
-          echo "⏳ Waiting for internal FQDN to be updated..."
           sleep 20
           
-          # Get new internal FQDN
-          INTERNAL_FQDN=$(az containerapp show \
-            --name ${{ env.CONTAINER_APP_NAME }} \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --query "properties.configuration.ingress.fqdn" -o tsv)
-          
+          INTERNAL_FQDN=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.configuration.ingress.fqdn" -o tsv)
           if [ -n "$INTERNAL_FQDN" ]; then
-            echo "✅ Internal FQDN: $INTERNAL_FQDN"
-            echo "microservice_fqdn=$INTERNAL_FQDN" >> $GITHUB_ENV
             echo "microservice_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
             echo "MICROSERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
             echo "ARCS_SERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
-            echo "arcs_service_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
-            echo "ingress_changed=true" >> $GITHUB_ENV
-          else
-            echo "⚠️  Could not retrieve internal FQDN"
-            echo "ingress_changed=false" >> $GITHUB_ENV
-          fi
-
-      - name: Verify APIM connectivity to Container App
-        run: |
-          echo "=========================================="
-          echo "🔍 Verifying APIM connectivity to Container App"
-          echo "=========================================="
-          
-          # Check if APIM has VNet connectivity
-          APIM_VNET=$(az apim show \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --name ${{ env.APIM_NAME_HML2 }} \
-            --query "properties.virtualNetworkType" -o tsv 2>/dev/null || echo "None")
-          
-          echo "APIM VNet Type: $APIM_VNET"
-          
-          if [ "$APIM_VNET" == "None" ] || [ "$APIM_VNET" == "External" ]; then
-            echo "⚠️  WARNING: APIM is not configured with VNet integration"
-            echo "   APIM may not be able to reach internal Container App"
-            echo "   Consider configuring APIM with VNet integration"
-          else
-            echo "✅ APIM has VNet integration configured"
-          fi
-          
-          # Verify backend URL is internal
-          BACKEND_URL="${{ env.microservice_url }}"
-          if [[ "$BACKEND_URL" == *".azurecontainerapps.io"* ]]; then
-            echo "✅ Backend URL is using Container App FQDN: $BACKEND_URL"
-          else
-            echo "⚠️  WARNING: Backend URL may not be correct: $BACKEND_URL"
           fi
 
       - name: Configure API in APIM
-        id: configure_apim
         run: |
-          echo "=========================================="
-          echo "🔧 Configuring API in APIM"
-          echo "=========================================="
-          
           API_ID="${{ env.CONTAINER_APP_NAME }}"
           BACKEND_URL="${{ env.microservice_url }}"
+          PROTOCOLS="${{ vars.APIM_API_PROTOCOLS }}"
+          [ -z "$PROTOCOLS" ] && PROTOCOLS="https"
           
-          # Check if API exists
-          if az apim api show \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --service-name ${{ env.APIM_NAME_HML2 }} \
-            --api-id "$API_ID" \
-            --output none 2>/dev/null; then
-            echo "✅ API already exists. Updating..."
-            echo "api_exists=true" >> $GITHUB_ENV
-            
-            az apim api update \
-              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-              --service-name ${{ env.APIM_NAME_HML2 }} \
-              --api-id "$API_ID" \
-              --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
-              --path "${{ vars.APIM_API_ROUTE_PATH }}" \
-              --service-url "$BACKEND_URL" \
-              --protocols "${{ vars.APIM_API_PROTOCOLS }}" \
-              --description "${{ vars.APIM_API_DESCRIPTION }}"
+          if az apim api show --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --service-name ${{ env.APIM_NAME_HML2 }} --api-id "$API_ID" --output none 2>/dev/null; then
+            az apim api update --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --service-name ${{ env.APIM_NAME_HML2 }} \
+              --api-id "$API_ID" --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
+              --path "${{ vars.APIM_API_ROUTE_PATH }}" --service-url "$BACKEND_URL" \
+              --protocols "$PROTOCOLS" --description "${{ vars.APIM_API_DESCRIPTION }}"
           else
-            echo "ℹ️  API does not exist. Creating..."
-            echo "api_exists=false" >> $GITHUB_ENV
-            
-            az apim api create \
-              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-              --service-name ${{ env.APIM_NAME_HML2 }} \
-              --api-id "$API_ID" \
-              --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
-              --path "${{ vars.APIM_API_ROUTE_PATH }}" \
-              --service-url "$BACKEND_URL" \
-              --protocols "${{ vars.APIM_API_PROTOCOLS }}" \
-              --description "${{ vars.APIM_API_DESCRIPTION }}"
+            az apim api create --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --service-name ${{ env.APIM_NAME_HML2 }} \
+              --api-id "$API_ID" --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
+              --path "${{ vars.APIM_API_ROUTE_PATH }}" --service-url "$BACKEND_URL" \
+              --protocols "$PROTOCOLS" --description "${{ vars.APIM_API_DESCRIPTION }}"
           fi
-          
-          echo "✅ API configured in APIM"
-          echo "   Backend URL: $BACKEND_URL"
-          echo "   Path: ${{ vars.APIM_API_ROUTE_PATH }}"
 
-      - name: Import/Update OpenAPI specification in APIM
+      - name: Import OpenAPI specification
         run: |
-          echo "=========================================="
-          echo "📄 Importing OpenAPI specification"
-          echo "=========================================="
-          
           if [ ! -f "${{ github.workspace }}/infra/openapi.yml" ]; then
-            echo "⚠️  OpenAPI file not found. Skipping import..."
+            echo "⚠️  OpenAPI file not found - skipping"
             exit 0
           fi
           
-          az apim api import \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --service-name ${{ env.APIM_NAME_HML2 }} \
-            --api-id ${{ env.CONTAINER_APP_NAME }} \
-            --path "${{ vars.APIM_API_ROUTE_PATH }}" \
-            --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" \
-            --description "${{ vars.APIM_API_DESCRIPTION }}" \
-            --service-url "${{ env.microservice_url }}" \
-            --specification-path ${{ github.workspace }}/infra/openapi.yml \
-            --specification-format OpenApi \
-            --protocols https
-          
-          echo "✅ OpenAPI specification imported"
-
-      - name: Verify APIM backend connectivity
-        run: |
-          echo "=========================================="
-          echo "🔍 Verifying APIM backend connectivity"
-          echo "=========================================="
-          
-          # Get API backend URL
-          BACKEND_URL=$(az apim api show \
-            --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --service-name ${{ env.APIM_NAME_HML2 }} \
-            --api-id ${{ env.CONTAINER_APP_NAME }} \
-            --query "properties.serviceUrl" -o tsv 2>/dev/null || echo "")
-          
-          if [ -z "$BACKEND_URL" ]; then
-            echo "⚠️  Could not retrieve backend URL from APIM"
-            exit 0
-          fi
-          
-          echo "Backend URL configured in APIM: $BACKEND_URL"
-          echo "Expected internal URL: ${{ env.microservice_url }}"
-          
-          if [ "$BACKEND_URL" == "${{ env.microservice_url }}" ]; then
-            echo "✅ Backend URL matches expected internal URL"
-          else
-            echo "⚠️  WARNING: Backend URL does not match expected internal URL"
-            echo "   This may cause connectivity issues if Container App is internal"
-          fi
-          
-          # Test connectivity (if external ingress still exists)
-          if [ "${{ env.ingress_changed }}" != "true" ]; then
-            echo "Testing backend connectivity..."
-            HTTP_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/lib/health_check" --max-time 10 --connect-timeout 5 2>/dev/null || echo "000")
-            if [ "$HTTP_CODE" == "200" ]; then
-              echo "✅ Backend is reachable (HTTP $HTTP_CODE)"
-            else
-              echo "⚠️  Backend returned HTTP $HTTP_CODE (may be expected if internal)"
-            fi
-          else
-            echo "ℹ️  Skipping connectivity test (Container App is internal)"
-          fi
-
-      - name: Deployment summary
-        run: |
-          echo "=========================================="
-          echo "✅ DEPLOYMENT SUMMARY"
-          echo "=========================================="
-          echo "Container App: ${{ env.CONTAINER_APP_NAME }}"
-          echo "Internal URL: ${{ env.microservice_url }}"
-          echo "External URL: ${{ env.MICROSERVICE_EXTERNAL_URL }}"
-          echo "APIM Service: ${{ env.APIM_NAME_HML2 }}"
-          echo "Ingress Type: $([ "${{ env.ingress_changed }}" == "true" ] && echo "Internal (Private)" || echo "External")"
-          echo "=========================================="
-          echo ""
-          echo "ℹ️  ARCS-SERVICE is the central service registry."
-          echo "   It does not need to register itself."
-          echo "   Other microservices register with it."
-          echo ""
-          echo "✅ Deployment completed successfully!"
+          az apim api import --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --service-name ${{ env.APIM_NAME_HML2 }} \
+            --api-id ${{ env.CONTAINER_APP_NAME }} --path "${{ vars.APIM_API_ROUTE_PATH }}" \
+            --display-name "${{ vars.APIM_API_NAME_FRIENDLY }}" --description "${{ vars.APIM_API_DESCRIPTION }}" \
+            --service-url "${{ env.microservice_url }}" --specification-path ${{ github.workspace }}/infra/openapi.yml \
+            --specification-format OpenApi --protocols https

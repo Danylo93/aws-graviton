@@ -1,7 +1,8 @@
 import typing as t
+from enum import Enum
 
 from arcs_lib_pca.use_case import UseCase, execute_use_case
-from arcs_lib_pca.domain.value_objects import DateTime, GenericUUID, MandatoryGroup, MandatorySubgroup
+from arcs_lib_pca.domain.value_objects import DateTime, GenericUUID
 from arcs_lib_pca.infrastructure.repository import Repositories
 from arcs_lib_pca.infrastructure.repository.redis_repository import RedisRepository
 from arcs_lib_pca.utils.json import data_decode
@@ -22,6 +23,13 @@ from .group import LoadGroupUseCase
 from .subgroup import LoadSubGroupUseCase
 from .permissions import LoadProfilePermissionsUseCase, ProfilePermissionStructure
 from arcs_lib_pca.domain.value_objects import File
+
+# Constantes locais para substituir MandatoryGroup e MandatorySubgroup que não existem na versão atual da biblioteca
+class MandatoryGroup(Enum):
+    PUBLIC = "public"
+
+class MandatorySubgroup(Enum):
+    MAIN_PUBLIC = "main_public"
 class LoadProfileUseCase(UseCase[t.Optional[ProfileModel]]):
 
     def execute(self, 
@@ -96,8 +104,8 @@ class LoadProfileUseCase(UseCase[t.Optional[ProfileModel]]):
             profile_model.subgroup_id = subgroup_model.id
 
         if not profile_model.subgroup_id:
-            group_model = execute_use_case(LoadGroupUseCase, group_name=str(MandatoryGroup.PUBLIC.value).lower(), is_mandatory=True)
-            subgroup_model = execute_use_case(LoadSubGroupUseCase, group_model=group_model, subgroup_name=str(MandatorySubgroup.MAIN_PUBLIC.value).lower(), is_mandatory=True)
+            group_model = execute_use_case(LoadGroupUseCase, group_name=MandatoryGroup.PUBLIC.value.lower(), is_mandatory=True)
+            subgroup_model = execute_use_case(LoadSubGroupUseCase, group_model=group_model, subgroup_name=MandatorySubgroup.MAIN_PUBLIC.value.lower(), is_mandatory=True)
 
             if not subgroup_model:
                 raise RuntimeError("Subgroup not found")
@@ -190,7 +198,7 @@ class LoadProfileUseCase(UseCase[t.Optional[ProfileModel]]):
             })
 
     def _create_public_profile(self, person: PersonModel):
-        public_subgroup : SubGroupModel | None = Repositories(SubGroupModel()).db.get_by(name=str(MandatorySubgroup.MAIN_PUBLIC.value).lower())
+        public_subgroup : SubGroupModel | None = Repositories(SubGroupModel()).db.get_by(name=MandatorySubgroup.MAIN_PUBLIC.value.lower())
 
         if not public_subgroup:
             return
