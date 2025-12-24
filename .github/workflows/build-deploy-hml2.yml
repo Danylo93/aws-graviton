@@ -393,20 +393,29 @@ jobs:
             az postgres flexible-server db create --resource-group "$RG_NAME" --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" --database-name "${{ env.POSTGRES_DB_HML2 }}"
           fi
           
-          # Criar conexão PostgreSQL igual ao HML (com --yes e service-principal com object-id)
+          # Criar conexão PostgreSQL igual ao HML (com service-principal)
           if ! az containerapp connection show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --connection "$CONNECTION_NAME" --output none 2>/dev/null; then
             echo "🔗 Creating PostgreSQL connection $CONNECTION_NAME..."
             
-            if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CLIENT_SECRET" ] && [ -n "$AZURE_CLIENT_OBJECT_ID" ]; then
+            if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CLIENT_SECRET" ]; then
               # Criar com service principal (preferencial)
+              # Para PostgreSQL, usar apenas client-id e secret (object-id pode causar problemas)
               az containerapp connection create postgres-flexible \
                 --target-id "$PG_TARGET" \
                 --source-id "$CONTAINER_APP_SOURCE_ID" \
                 --container "$CONTAINER_APP_NAME" \
                 --connection "$CONNECTION_NAME" \
                 --client-type python \
-                --service-principal client-id="$AZURE_CLIENT_ID" object-id="$AZURE_CLIENT_OBJECT_ID" secret="$AZURE_CLIENT_SECRET" \
-                --yes
+                --service-principal client-id="$AZURE_CLIENT_ID" secret="$AZURE_CLIENT_SECRET" 2>&1 || \
+              # Se falhar, tentar com object-id também
+              ( [ -n "$AZURE_CLIENT_OBJECT_ID" ] && \
+                az containerapp connection create postgres-flexible \
+                  --target-id "$PG_TARGET" \
+                  --source-id "$CONTAINER_APP_SOURCE_ID" \
+                  --container "$CONTAINER_APP_NAME" \
+                  --connection "$CONNECTION_NAME" \
+                  --client-type python \
+                  --service-principal client-id="$AZURE_CLIENT_ID" object-id="$AZURE_CLIENT_OBJECT_ID" secret="$AZURE_CLIENT_SECRET" 2>&1 )
             else
               # Fallback: criar sem service principal (usando managed identity)
               echo "⚠️  Service principal credentials not available, creating with managed identity..."
@@ -415,8 +424,7 @@ jobs:
                 --source-id "$CONTAINER_APP_SOURCE_ID" \
                 --container "$CONTAINER_APP_NAME" \
                 --connection "$CONNECTION_NAME" \
-                --client-type python \
-                --yes
+                --client-type python 2>&1
             fi
           else
             echo "✅ PostgreSQL connection $CONNECTION_NAME already exists"
