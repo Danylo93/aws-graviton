@@ -221,6 +221,11 @@ jobs:
           CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
           CONTAINER_APP_SOURCE_ID="${{ env.CONTAINER_APP_SOURCE_ID }}"
           
+          # Carregar secrets do service principal (se disponíveis)
+          AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID_HML2 }}"
+          AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET_HML2 }}"
+          AZURE_CLIENT_OBJECT_ID="${{ secrets.AZURE_CLIENT_OBJECT_ID_HML2 }}"
+          
           create_connection() {
             local conn_type=$1
             local conn_name=$2
@@ -229,44 +234,68 @@ jobs:
             local extra_args=${5:-}
             
             if az containerapp connection show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --connection "$conn_name" --output none 2>/dev/null; then
+              echo "✅ Connection $conn_name already exists, skipping..."
               return 0
             fi
             
-            az containerapp connection create $conn_type \
-              --target-id "$target_id" \
-              --source-id "$CONTAINER_APP_SOURCE_ID" \
-              --container "$CONTAINER_APP_NAME" \
-              --connection "$conn_name" \
-              --client-type "$client_type" \
-              $extra_args 2>&1
+            echo "🔗 Creating connection $conn_name..."
+            
+            # Se service principal está disponível, usar --service-principal
+            if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CLIENT_SECRET" ]; then
+              if [ "$conn_type" == "postgres-flexible" ] && [ -n "$AZURE_CLIENT_OBJECT_ID" ]; then
+                az containerapp connection create $conn_type \
+                  --target-id "$target_id" \
+                  --source-id "$CONTAINER_APP_SOURCE_ID" \
+                  --container "$CONTAINER_APP_NAME" \
+                  --connection "$conn_name" \
+                  --client-type "$client_type" \
+                  --service-principal client-id="$AZURE_CLIENT_ID" object-id="$AZURE_CLIENT_OBJECT_ID" secret="$AZURE_CLIENT_SECRET" \
+                  $extra_args 2>&1
+              else
+                az containerapp connection create $conn_type \
+                  --target-id "$target_id" \
+                  --source-id "$CONTAINER_APP_SOURCE_ID" \
+                  --container "$CONTAINER_APP_NAME" \
+                  --connection "$conn_name" \
+                  --client-type "$client_type" \
+                  --service-principal client-id="$AZURE_CLIENT_ID" secret="$AZURE_CLIENT_SECRET" \
+                  $extra_args 2>&1
+              fi
+            else
+              # Fallback: criar sem service-principal
+              az containerapp connection create $conn_type \
+                --target-id "$target_id" \
+                --source-id "$CONTAINER_APP_SOURCE_ID" \
+                --container "$CONTAINER_APP_NAME" \
+                --connection "$conn_name" \
+                --client-type "$client_type" \
+                $extra_args 2>&1
+            fi
           }
           
+          # Storage Blob
           create_connection "storage-blob" "arcsstorage" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/${{ env.STORAGE_NAME_HML2 }}/blobServices/default" "python" "--container $CONTAINER_APP_NAME"
-          create_connection "keyvault" "arcs_kv" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.KeyVault/vaults/${{ env.ARCS_KV_NAME_HML2 }}"
-          create_connection "redis" "arcsredis" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Cache/redis/redis-arcs-porschecup-hml2"
-          create_connection "webpubsub" "arcs_pubsub" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.SignalRService/WebPubSub/${{ env.ARCS_PUBSUB_HML2 }}"
+          
+          # Key Vault
+          create_connection "keyvault" "arcs_kv" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.KeyVault/vaults/${{ env.ARCS_KV_NAME_HML2 }}" "python"
           
           # PostgreSQL
           PG_TARGET="/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/${{ env.ARCS_POSTGRES_SERVER_HML2 }}/databases/${{ env.POSTGRES_DB_HML2 }}"
           CONNECTION_NAME="user_${{ env.POSTGRES_DB_HML2 }}"
           
           if ! az postgres flexible-server db show --resource-group "$RG_NAME" --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" --database-name "${{ env.POSTGRES_DB_HML2 }}" --output none 2>/dev/null; then
+            echo "📦 Creating PostgreSQL database ${{ env.POSTGRES_DB_HML2 }}..."
             az postgres flexible-server db create --resource-group "$RG_NAME" --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" --database-name "${{ env.POSTGRES_DB_HML2 }}"
           fi
           
-          PG_PASSWORD="${{ env.POSTGRES_PASSWORD_HML2 }}"
-          if [ -n "$PG_PASSWORD" ]; then
-            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python" "--secret name=password secret=\"$PG_PASSWORD\"" || \
-            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
-          else
-            create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
-          fi
+          create_connection "postgres-flexible" "$CONNECTION_NAME" "$PG_TARGET" "python"
           
-          POSTGRES_HOST="${{ env.ARCS_POSTGRES_SERVER_HML2 }}.postgres.database.azure.com"
-          az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --set-env-vars \
-            POSTGRES_HOST="$POSTGRES_HOST" POSTGRES_PORT="5432" POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
-            POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" POSTGRES_SSLMODE="require" \
-            --output none
+          # Web PubSub
+          create_connection "webpubsub" "arcs_pubsub" "/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.SignalRService/WebPubSub/${{ env.ARCS_PUBSUB_HML2 }}" "python"
+          
+          # Nota: Redis não é configurado via Service Connector no HML, então mantemos variáveis manuais
+          # As variáveis AZURE_* serão criadas automaticamente pelo Service Connector acima
+          
           set -e
       
   settings:
@@ -322,11 +351,34 @@ jobs:
 
       - name: Update Container App env vars
         run: |
+          # Carregar variáveis do PostgreSQL
+          APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
+          get_config_value() {
+            local key=$1
+            local secret_fallback=$2
+            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" --query "value" -o tsv 2>/dev/null || \
+            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --query "value" -o tsv 2>/dev/null || \
+            echo "$secret_fallback"
+          }
+          
+          ARCS_POSTGRES_SERVER_HML2=$(get_config_value "ARCS_POSTGRES_SERVER_HML2" "${{ secrets.ARCS_POSTGRES_SERVER_HML2 }}")
+          POSTGRES_DB_HML2=$(get_config_value "POSTGRES_DB_HML2" "${{ secrets.POSTGRES_DB_HML2 }}")
+          
+          # Atualizar variáveis de ambiente (mantendo as que vêm do Service Connector e adicionando as manuais necessárias)
           az containerapp update --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --set-env-vars "MICROSERVICE_INTERNAL_URL=${{ env.MICROSERVICE_INTERNAL_URL }}" \
+            --set-env-vars \
+            "MICROSERVICE_INTERNAL_URL=${{ env.MICROSERVICE_INTERNAL_URL }}" \
             "ARCS_SERVICE_INTERNAL_URL=${{ env.ARCS_SERVICE_INTERNAL_URL }}" \
-            "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" "REDIS_PORT=6379" \
-            "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" "REDIS_SSL_PORT=6380"
+            "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net" \
+            "REDIS_PORT=6379" \
+            "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}" \
+            "REDIS_SSL_PORT=6380" \
+            "MICROSERVICE_PORT=8000" \
+            "POSTGRES_HOST=${ARCS_POSTGRES_SERVER_HML2}.postgres.database.azure.com" \
+            "POSTGRES_PORT=5432" \
+            "POSTGRES_DB=${POSTGRES_DB_HML2}" \
+            "POSTGRES_USER=${ARCS_POSTGRES_SERVER_HML2}-admin" \
+            "POSTGRES_SSLMODE=require"
       
       - name: Execute post_boot
         run: |
