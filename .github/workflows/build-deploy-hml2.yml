@@ -311,11 +311,74 @@ jobs:
           RG_NAME="${{ env.RG_NAME_ARCS_HML2 }}"
           CONTAINER_APP_NAME="${{ env.CONTAINER_APP_NAME }}"
           CONTAINER_APP_SOURCE_ID="${{ env.CONTAINER_APP_SOURCE_ID }}"
+          APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
+          KV_NAME="${{ env.ARCS_KV_NAME_HML2 }}"
+          MS_NAME="arcs-service"
           
-          # Carregar secrets do service principal do App Config ou GitHub Secrets
-          AZURE_CLIENT_ID="${{ env.AZURE_CLIENT_ID_HML2 }}"
-          AZURE_CLIENT_SECRET="${{ env.AZURE_CLIENT_SECRET_HML2 }}"
-          AZURE_CLIENT_OBJECT_ID="${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }}"
+          # Função para carregar valores do App Config/Key Vault
+          get_config_value() {
+            local key=$1
+            local secret_fallback=$2
+            
+            # Tentar ler do App Config
+            KV_REF=$(az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" -o json 2>/dev/null || \
+                     az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" -o json 2>/dev/null)
+            
+            if [ -n "$KV_REF" ]; then
+              # Verificar se é referência do Key Vault
+              CONTENT_TYPE=$(echo "$KV_REF" | jq -r '.contentType // ""' 2>/dev/null)
+              if [[ "$CONTENT_TYPE" == *"keyvaultref"* ]]; then
+                # É referência do Key Vault, extrair URI e buscar o valor
+                KV_URI=$(echo "$KV_REF" | jq -r '.value.uri // .value // ""' 2>/dev/null)
+                if [ -n "$KV_URI" ]; then
+                  # Extrair nome do secret da URI (última parte após /secrets/)
+                  SECRET_NAME=$(echo "$KV_URI" | sed 's|.*/secrets/||' | sed 's|/.*||')
+                  VAULT_NAME=$(echo "$KV_URI" | sed 's|https://||' | sed 's|\.vault\.azure\.net.*||')
+                  # Buscar valor do Key Vault
+                  KV_VALUE=$(az keyvault secret show --vault-name "$VAULT_NAME" --name "$SECRET_NAME" --query "value" -o tsv 2>/dev/null)
+                  if [ -n "$KV_VALUE" ]; then
+                    echo "$KV_VALUE"
+                    return
+                  fi
+                fi
+              else
+                # Valor direto do App Config
+                APP_VALUE=$(echo "$KV_REF" | jq -r '.value // ""' 2>/dev/null)
+                if [ -n "$APP_VALUE" ]; then
+                  echo "$APP_VALUE"
+                  return
+                fi
+              fi
+            fi
+            
+            # Fallback para GitHub Secret
+            echo "$secret_fallback"
+          }
+          
+          # Carregar secrets do service principal do App Config/Key Vault
+          AZURE_CLIENT_ID=$(get_config_value "AZURE_CLIENT_ID_HML2" "${{ secrets.AZURE_CLIENT_ID_HML2 }}")
+          AZURE_CLIENT_SECRET=$(get_config_value "AZURE_CLIENT_SECRET_HML2" "${{ secrets.AZURE_CLIENT_SECRET_HML2 }}")
+          AZURE_CLIENT_OBJECT_ID=$(get_config_value "AZURE_CLIENT_OBJECT_ID_HML2" "${{ secrets.AZURE_CLIENT_OBJECT_ID_HML2 }}")
+          
+          # Fallback: tentar buscar diretamente do Key Vault se não encontrou
+          if [ -z "$AZURE_CLIENT_ID" ]; then
+            echo "📋 Tentando buscar CLIENT_ID diretamente do Key Vault..."
+            AZURE_CLIENT_ID=$(az keyvault secret show --vault-name "$KV_NAME" --name "AZURE-CLIENT-ID-HML2" --query value -o tsv 2>/dev/null || echo "")
+          fi
+          if [ -z "$AZURE_CLIENT_SECRET" ]; then
+            echo "📋 Tentando buscar CLIENT_SECRET diretamente do Key Vault..."
+            AZURE_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KV_NAME" --name "AZURE-CLIENT-SECRET-HML2" --query value -o tsv 2>/dev/null || echo "")
+          fi
+          if [ -z "$AZURE_CLIENT_OBJECT_ID" ]; then
+            echo "📋 Tentando buscar OBJECT_ID diretamente do Key Vault..."
+            AZURE_CLIENT_OBJECT_ID=$(az keyvault secret show --vault-name "$KV_NAME" --name "AZURE-CLIENT-OBJECT-ID-HML2" --query value -o tsv 2>/dev/null || echo "")
+          fi
+          
+          # Se ainda não tiver OBJECT_ID, obter do service principal
+          if [ -z "$AZURE_CLIENT_OBJECT_ID" ] && [ -n "$AZURE_CLIENT_ID" ]; then
+            echo "📋 Obtendo OBJECT_ID do service principal via Azure AD..."
+            AZURE_CLIENT_OBJECT_ID=$(az ad sp show --id "$AZURE_CLIENT_ID" --query id -o tsv 2>/dev/null || echo "")
+          fi
           
           # Verificar se os secrets estão disponíveis
           if [ -z "$AZURE_CLIENT_ID" ] || [ -z "$AZURE_CLIENT_SECRET" ]; then
@@ -326,6 +389,7 @@ jobs:
           else
             echo "✅ Service principal credentials available"
             echo "   AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:0:8}..."
+            echo "   AZURE_CLIENT_OBJECT_ID: ${AZURE_CLIENT_OBJECT_ID:0:8}..."
           fi
           
           create_connection() {
