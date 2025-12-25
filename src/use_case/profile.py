@@ -1,8 +1,16 @@
 import typing as t
+from enum import Enum
 
 from arcs_lib_pca.use_case import UseCase, execute_use_case
-from arcs_lib_pca.domain.value_objects import DateTime, GenericUUID, MandatoryGroup, MandatorySubgroup
+from arcs_lib_pca.domain.value_objects import DateTime, GenericUUID
 from arcs_lib_pca.infrastructure.repository import Repositories
+
+# Definindo enums locais para substituir os que não existem mais em arcs_lib_pca
+class MandatoryGroup(Enum):
+    PUBLIC = "Public"
+
+class MandatorySubgroup(Enum):
+    MAIN_PUBLIC = "Public User"
 from arcs_lib_pca.infrastructure.repository.redis_repository import RedisRepository
 from arcs_lib_pca.utils.json import data_decode
 from arcs_lib_pca.arcs import get_instance_app
