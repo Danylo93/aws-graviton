@@ -493,18 +493,19 @@ jobs:
           fi
           
           # Criar conexão PostgreSQL com service-principal (formato exato do HML)
-          if [ "${{ env.aca_exists }}" == "false" ]; then
+          # Verificar se conexão já existe
+          if ! az containerapp connection show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --connection user_${{ env.POSTGRES_DB_HML2 }} --output none 2>/dev/null; then
             echo "🔗 Creating PostgreSQL connection user_${{ env.POSTGRES_DB_HML2 }}..."
             az containerapp connection create postgres-flexible \
               --target-id ${{ env.AZURE_PATH_PROVIDERS }}/Microsoft.DBforPostgreSQL/flexibleServers/${{ env.ARCS_POSTGRES_SERVER_HML2 }}/databases/${{ env.POSTGRES_DB_HML2 }} \
               --source-id ${{ env.CONTAINER_APP_SOURCE_ID }} \
-              --container ${{ github.event.repository.name }}-hml2 \
+              --container ${{ env.CONTAINER_APP_NAME }} \
               --connection user_${{ env.POSTGRES_DB_HML2 }} \
               --client-type python \
               --service-principal client-id=${{ env.AZURE_CLIENT_ID_HML2 }} object-id=${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }} secret=${{ env.AZURE_CLIENT_SECRET_HML2 }} \
               --yes
           else
-            echo "✅ Container App already exists, PostgreSQL connection should already be created"
+            echo "✅ PostgreSQL connection user_${{ env.POSTGRES_DB_HML2 }} already exists"
           fi
           
           # Configurar variáveis de ambiente do PostgreSQL
