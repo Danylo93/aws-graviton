@@ -431,66 +431,22 @@ jobs:
             az postgres flexible-server db create --resource-group "$RG_NAME" --server-name "${{ env.ARCS_POSTGRES_SERVER_HML2 }}" --database-name "${{ env.POSTGRES_DB_HML2 }}"
           fi
           
-          # Criar conexão PostgreSQL via API REST usando User-Assigned Identity (mais confiável)
+          # Criar conexão PostgreSQL com service-principal (igual ao HML)
           if ! az containerapp connection show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --connection "$CONNECTION_NAME" --output none 2>/dev/null; then
             echo "🔗 Creating PostgreSQL connection $CONNECTION_NAME..."
-            echo "   Using API REST with User-Assigned Identity..."
             
-            # Obter User-Assigned Identity do Container App
-            USER_ASSIGNED_ID=$(az containerapp identity show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --query "userAssignedIdentities" -o json 2>/dev/null | jq -r 'keys[0] // empty' 2>/dev/null)
-            USER_CLIENT_ID=$(az containerapp identity show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --query "userAssignedIdentities" -o json 2>/dev/null | jq -r '.[] | .clientId' 2>/dev/null | head -1)
-            
-            TOKEN=$(az account get-access-token --query accessToken -o tsv)
-            API_URL="https://management.azure.com${CONTAINER_APP_SOURCE_ID}/providers/Microsoft.ServiceLinker/linkers/${CONNECTION_NAME}?api-version=2022-05-01"
-            
-            if [ -n "$USER_CLIENT_ID" ] && [ -n "$USER_ASSIGNED_ID" ]; then
-              # Usar User-Assigned Identity (mais confiável para PostgreSQL)
-              SUB_ID="${{ env.AZURE_SUBSCRIPTION_ID }}"
-              RESPONSE=$(curl -s -X PUT "$API_URL" \
-                -H "Authorization: Bearer $TOKEN" \
-                -H "Content-Type: application/json" \
-                -d "{
-                  \"properties\": {
-                    \"targetService\": {
-                      \"type\": \"AzureResource\",
-                      \"id\": \"${PG_TARGET}\"
-                    },
-                    \"authInfo\": {
-                      \"authType\": \"userAssignedIdentity\",
-                      \"clientId\": \"${USER_CLIENT_ID}\",
-                      \"subscriptionId\": \"${SUB_ID}\"
-                    },
-                    \"clientType\": \"python\",
-                    \"scope\": \"${CONTAINER_APP_NAME}\"
-                  }
-                }")
+            if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CLIENT_SECRET" ] && [ -n "$AZURE_CLIENT_OBJECT_ID" ]; then
+              echo "   Using service-principal (client-id, object-id, secret)..."
+              az containerapp connection create postgres-flexible \
+                --target-id "$PG_TARGET" \
+                --source-id "$CONTAINER_APP_SOURCE_ID" \
+                --container "$CONTAINER_APP_NAME" \
+                --connection "$CONNECTION_NAME" \
+                --client-type python \
+                --service-principal client-id="$AZURE_CLIENT_ID" object-id="$AZURE_CLIENT_OBJECT_ID" secret="$AZURE_CLIENT_SECRET" \
+                --yes 2>&1
             else
-              # Fallback para System-Assigned Identity
-              RESPONSE=$(curl -s -X PUT "$API_URL" \
-                -H "Authorization: Bearer $TOKEN" \
-                -H "Content-Type: application/json" \
-                -d "{
-                  \"properties\": {
-                    \"targetService\": {
-                      \"type\": \"AzureResource\",
-                      \"id\": \"${PG_TARGET}\"
-                    },
-                    \"authInfo\": {
-                      \"authType\": \"systemAssignedIdentity\"
-                    },
-                    \"clientType\": \"python\",
-                    \"scope\": \"${CONTAINER_APP_NAME}\"
-                  }
-                }")
-            fi
-            
-            if echo "$RESPONSE" | grep -q '"id"'; then
-              PROV_STATE=$(echo "$RESPONSE" | grep -o '"provisioningState":"[^"]*"' | cut -d'"' -f4)
-              echo "✅ PostgreSQL connection created via API REST (State: $PROV_STATE)"
-            else
-              echo "⚠️  API REST failed, trying CLI fallback..."
-              echo "$RESPONSE" | head -5
-              # Fallback para CLI
+              echo "⚠️  Service principal credentials not fully available, using managed identity fallback..."
               az containerapp connection create postgres-flexible \
                 --target-id "$PG_TARGET" \
                 --source-id "$CONTAINER_APP_SOURCE_ID" \
