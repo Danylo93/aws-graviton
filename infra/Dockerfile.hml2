@@ -52,6 +52,8 @@ COPY ./.env ./.env
 COPY ./main.py ./
 COPY ./pyproject.toml ./
 COPY ./README.md ./
+# Copy keys directory (priv-arcs.pem and pub-arcs.pem)
+COPY ./keys ./keys
 
 # Install dependencies for hml2 environment
 RUN poetry install --with hml2 --without dev --no-interaction

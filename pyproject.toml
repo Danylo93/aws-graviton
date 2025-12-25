@@ -21,6 +21,10 @@ gunicorn = "^23.0.0"
 arcs-lib-pca = { path = "../arcs-lib-pca/" }
 gunicorn = "^23.0.0"
 
+[tool.poetry.group.hml2.dependencies]
+arcs-lib-pca = { path = "../arcs-lib-pca/" }
+gunicorn = "^23.0.0"
+
 [tool.poetry.group.dev.dependencies]
 arcs-lib-pca = { path = "../arcs-lib-pca/", develop=true}
 tox = "^4.15.0"
