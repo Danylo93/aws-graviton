@@ -502,8 +502,7 @@ jobs:
               --container ${{ env.CONTAINER_APP_NAME }} \
               --connection user_${{ env.POSTGRES_DB_HML2 }} \
               --client-type python \
-              --service-principal client-id=${{ env.AZURE_CLIENT_ID_HML2 }} object-id=${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }} secret=${{ env.AZURE_CLIENT_SECRET_HML2 }} \
-              --yes
+              --service-principal client-id=${{ env.AZURE_CLIENT_ID_HML2 }} object-id=${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }} secret=${{ env.AZURE_CLIENT_SECRET_HML2 }}
           else
             echo "✅ PostgreSQL connection user_${{ env.POSTGRES_DB_HML2 }} already exists"
           fi
