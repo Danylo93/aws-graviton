@@ -357,10 +357,11 @@ jobs:
           }
           
           # Carregar secrets do service principal do App Config/Key Vault
-          # Usar valores já carregados nas variáveis de ambiente (da etapa anterior)
-          AZURE_CLIENT_ID="${{ env.AZURE_CLIENT_ID_HML2 }}"
-          AZURE_CLIENT_SECRET="${{ env.AZURE_CLIENT_SECRET_HML2 }}"
-          AZURE_CLIENT_OBJECT_ID="${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }}"
+          echo "📋 Carregando service principal credentials do App Config/Key Vault..."
+          AZURE_CLIENT_ID=$(get_config_value "AZURE_CLIENT_ID_HML2" "${{ secrets.AZURE_CLIENT_ID_HML2 }}")
+          # AZURE_CLIENT_SECRET_HML2 está no Key Vault, buscar diretamente
+          AZURE_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KV_NAME" --name "AZURE-CLIENT-SECRET-HML2" --query value -o tsv 2>/dev/null || echo "${{ secrets.AZURE_CLIENT_SECRET_HML2 }}")
+          AZURE_CLIENT_OBJECT_ID=$(get_config_value "AZURE_CLIENT_OBJECT_ID_HML2" "${{ secrets.AZURE_CLIENT_OBJECT_ID_HML2 }}")
           
           # Se não tiver OBJECT_ID, obter do service principal
           if [ -z "$AZURE_CLIENT_OBJECT_ID" ] && [ -n "$AZURE_CLIENT_ID" ]; then
@@ -484,14 +485,16 @@ jobs:
           # Verificar se conexão já existe
           if ! az containerapp connection show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --connection user_${{ env.POSTGRES_DB_HML2 }} --output none 2>/dev/null; then
             echo "🔗 Creating PostgreSQL connection user_${{ env.POSTGRES_DB_HML2 }}..."
+            echo "   Using CLIENT_ID: ${AZURE_CLIENT_ID:0:8}..."
+            echo "   Using OBJECT_ID: ${AZURE_CLIENT_OBJECT_ID:0:8}..."
+            echo "   Using SECRET: ${AZURE_CLIENT_SECRET:+SET}${AZURE_CLIENT_SECRET:-NOT SET}"
             az containerapp connection create postgres-flexible \
               --target-id ${{ env.AZURE_PATH_PROVIDERS }}/Microsoft.DBforPostgreSQL/flexibleServers/${{ env.ARCS_POSTGRES_SERVER_HML2 }}/databases/${{ env.POSTGRES_DB_HML2 }} \
               --source-id ${{ env.CONTAINER_APP_SOURCE_ID }} \
               --container ${{ env.CONTAINER_APP_NAME }} \
               --connection user_${{ env.POSTGRES_DB_HML2 }} \
               --client-type python \
-              --service-principal client-id=${{ env.AZURE_CLIENT_ID_HML2 }} object-id=${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }} secret=${{ env.AZURE_CLIENT_SECRET_HML2 }} \
-              --yes
+              --service-principal client-id="$AZURE_CLIENT_ID" object-id="$AZURE_CLIENT_OBJECT_ID" secret="$AZURE_CLIENT_SECRET"
           else
             echo "✅ PostgreSQL connection user_${{ env.POSTGRES_DB_HML2 }} already exists"
           fi
