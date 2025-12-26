@@ -708,7 +708,8 @@ jobs:
           sudo apt-get install -y -qq sshpass
           
           # Valores hardcoded da VM (sem App Config ou Secrets)
-          VM_IP_HML2="10.40.13.100"
+          # Usando vm-teste-apim-hml2 com IP público (172.177.27.230)
+          VM_IP_HML2="172.177.27.230"
           VM_USER_HML2="azureuser"
           VM_PASSWORD="Jesus@2025@2026"
           
