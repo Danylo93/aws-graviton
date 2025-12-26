@@ -172,7 +172,8 @@ jobs:
           APIM_NAME_HML2=$(get_config_value "APIM_NAME_HML2" "${{ secrets.APIM_NAME_HML2 }}")
           AZURE_MANAGED_IDENTITY_NAME_HML2=$(get_config_value "AZURE_MANAGED_IDENTITY_NAME_HML2" "${{ secrets.AZURE_MANAGED_IDENTITY_NAME_HML2 }}")
           AZURE_CLIENT_ID_HML2=$(get_config_value "AZURE_CLIENT_ID_HML2" "${{ secrets.AZURE_CLIENT_ID_HML2 }}")
-          AZURE_CLIENT_SECRET_HML2=$(get_config_value "AZURE_CLIENT_SECRET_HML2" "${{ secrets.AZURE_CLIENT_SECRET_HML2 }}")
+          # AZURE_CLIENT_SECRET_HML2 está no Key Vault, buscar diretamente (usar variável local já carregada)
+          AZURE_CLIENT_SECRET_HML2=$(az keyvault secret show --vault-name "$ARCS_KV_NAME_HML2" --name "AZURE-CLIENT-SECRET-HML2" --query value -o tsv 2>/dev/null || echo "${{ secrets.AZURE_CLIENT_SECRET_HML2 }}")
           AZURE_CLIENT_OBJECT_ID_HML2=$(get_config_value "AZURE_CLIENT_OBJECT_ID_HML2" "${{ secrets.AZURE_CLIENT_OBJECT_ID_HML2 }}")
           
           echo "AZURE_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID" >> $GITHUB_ENV
@@ -356,25 +357,12 @@ jobs:
           }
           
           # Carregar secrets do service principal do App Config/Key Vault
-          AZURE_CLIENT_ID=$(get_config_value "AZURE_CLIENT_ID_HML2" "${{ secrets.AZURE_CLIENT_ID_HML2 }}")
-          AZURE_CLIENT_SECRET=$(get_config_value "AZURE_CLIENT_SECRET_HML2" "${{ secrets.AZURE_CLIENT_SECRET_HML2 }}")
-          AZURE_CLIENT_OBJECT_ID=$(get_config_value "AZURE_CLIENT_OBJECT_ID_HML2" "${{ secrets.AZURE_CLIENT_OBJECT_ID_HML2 }}")
+          # Usar valores já carregados nas variáveis de ambiente (da etapa anterior)
+          AZURE_CLIENT_ID="${{ env.AZURE_CLIENT_ID_HML2 }}"
+          AZURE_CLIENT_SECRET="${{ env.AZURE_CLIENT_SECRET_HML2 }}"
+          AZURE_CLIENT_OBJECT_ID="${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }}"
           
-          # Fallback: tentar buscar diretamente do Key Vault se não encontrou
-          if [ -z "$AZURE_CLIENT_ID" ]; then
-            echo "📋 Tentando buscar CLIENT_ID diretamente do Key Vault..."
-            AZURE_CLIENT_ID=$(az keyvault secret show --vault-name "$KV_NAME" --name "AZURE-CLIENT-ID-HML2" --query value -o tsv 2>/dev/null || echo "")
-          fi
-          if [ -z "$AZURE_CLIENT_SECRET" ]; then
-            echo "📋 Tentando buscar CLIENT_SECRET diretamente do Key Vault..."
-            AZURE_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KV_NAME" --name "AZURE-CLIENT-SECRET-HML2" --query value -o tsv 2>/dev/null || echo "")
-          fi
-          if [ -z "$AZURE_CLIENT_OBJECT_ID" ]; then
-            echo "📋 Tentando buscar OBJECT_ID diretamente do Key Vault..."
-            AZURE_CLIENT_OBJECT_ID=$(az keyvault secret show --vault-name "$KV_NAME" --name "AZURE-CLIENT-OBJECT-ID-HML2" --query value -o tsv 2>/dev/null || echo "")
-          fi
-          
-          # Se ainda não tiver OBJECT_ID, obter do service principal
+          # Se não tiver OBJECT_ID, obter do service principal
           if [ -z "$AZURE_CLIENT_OBJECT_ID" ] && [ -n "$AZURE_CLIENT_ID" ]; then
             echo "📋 Obtendo OBJECT_ID do service principal via Azure AD..."
             AZURE_CLIENT_OBJECT_ID=$(az ad sp show --id "$AZURE_CLIENT_ID" --query id -o tsv 2>/dev/null || echo "")
@@ -431,15 +419,15 @@ jobs:
                   echo "   Deleting to recreate with --service-principal..."
                   az containerapp connection delete \
               --name "$CONTAINER_APP_NAME" \
-              --resource-group "$RG_NAME" \
+            --resource-group "$RG_NAME" \
                     --connection "$conn_name" \
                     --yes 2>/dev/null || true
                   sleep 5
                 else
                   echo "✅ Connection $conn_name already exists with service-principal, skipping..."
                   return 0
-                fi
-              else
+            fi
+          else
                 echo "✅ Connection $conn_name already exists, skipping..."
                 return 0
               fi
@@ -502,7 +490,8 @@ jobs:
               --container ${{ env.CONTAINER_APP_NAME }} \
               --connection user_${{ env.POSTGRES_DB_HML2 }} \
               --client-type python \
-              --service-principal client-id=${{ env.AZURE_CLIENT_ID_HML2 }} object-id=${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }} secret=${{ env.AZURE_CLIENT_SECRET_HML2 }}
+              --service-principal client-id=${{ env.AZURE_CLIENT_ID_HML2 }} object-id=${{ env.AZURE_CLIENT_OBJECT_ID_HML2 }} secret=${{ env.AZURE_CLIENT_SECRET_HML2 }} \
+              --yes
           else
             echo "✅ PostgreSQL connection user_${{ env.POSTGRES_DB_HML2 }} already exists"
           fi
