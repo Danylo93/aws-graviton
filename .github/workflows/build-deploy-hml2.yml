@@ -736,26 +736,25 @@ jobs:
           echo "VM_USER_HML2=$VM_USER_HML2" >> $GITHUB_ENV
           
           # Obter senha do Key Vault (não SSH, apenas senha da VM)
-          # Carregar nome do Key Vault do App Config se não estiver em env
-          if [ -z "${{ env.ARCS_KV_NAME_HML2 }}" ]; then
-            KV_NAME=$(get_config_value "ARCS_KV_NAME_HML2" "arcs-kv-hml2")
-          else
-            KV_NAME="${{ env.ARCS_KV_NAME_HML2 }}"
-          fi
+          # Carregar nome do Key Vault do App Config (este step está no job settings, não tem acesso ao env do deploy)
+          KV_NAME=$(get_config_value "ARCS_KV_NAME_HML2" "arcs-kv-hml2")
           
+          echo "📋 Buscando senha no Key Vault: $KV_NAME"
           VM_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "VM-SSH-PASSWORD-HML2" --query value -o tsv 2>/dev/null || echo "")
           
           if [ -z "$VM_PASSWORD" ]; then
+            echo "⚠️  Senha não encontrada no Key Vault, tentando GitHub Secret..."
             # Fallback para GitHub Secret
             VM_PASSWORD="${{ secrets.VM_SSH_PASSWORD_HML2 }}"
           fi
           
           if [ -z "$VM_PASSWORD" ]; then
             echo "❌ Erro: Senha da VM não encontrada"
-            echo "Configure no Key Vault (VM-SSH-PASSWORD-HML2) ou GitHub Secret (VM_SSH_PASSWORD_HML2)"
+            echo "Configure no Key Vault ($KV_NAME/VM-SSH-PASSWORD-HML2) ou GitHub Secret (VM_SSH_PASSWORD_HML2)"
             exit 1
           fi
           
+          echo "✅ Senha da VM encontrada"
           echo "SSH_PASSWORD=$VM_PASSWORD" >> $GITHUB_ENV
           
           # Configurar known_hosts (evitar prompt de confirmação)
