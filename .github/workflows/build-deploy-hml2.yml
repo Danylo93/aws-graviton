@@ -671,7 +671,7 @@ jobs:
             --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
             --set-env-vars "${ENV_VARS[@]}"
       
-      - name: Execute post_boot
+      - name: Wait for Container App ready
         run: |
           for i in {1..30}; do
             STATUS=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.provisioningState" -o tsv 2>/dev/null || echo "Unknown")
@@ -679,32 +679,172 @@ jobs:
             sleep 10
           done
           
-          sleep 60
+          if [ "$STATUS" != "Succeeded" ]; then
+            echo "⚠️  Container App ainda não está 'Succeeded', mas continuando..."
+          fi
           
-          for i in {1..20}; do
-            HEALTH_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" "${{ env.microservice_url }}/lib/health_check" --max-time 10 --connect-timeout 5 2>/dev/null || echo "000")
-            if [ "$HEALTH_CODE" == "200" ]; then
-              HEALTH_RESPONSE=$(curl -k -L -s "${{ env.microservice_url }}/lib/health_check" --max-time 10 --connect-timeout 5 2>/dev/null || echo "")
-              POSTGRES_OK=$(echo "$HEALTH_RESPONSE" | grep -o '"postgres":[^,}]*' | grep -o 'true' || echo "")
-              REDIS_OK=$(echo "$HEALTH_RESPONSE" | grep -o '"redis":[^,}]*' | grep -o 'true' || echo "")
-              [ -n "$POSTGRES_OK" ] && [ -n "$REDIS_OK" ] && break
+          sleep 30
+
+      - name: Change ingress to internal
+        run: |
+          CAE_VNET=$(az containerapp env show --name ${{ env.ARCS_ENV_APP_HML2 }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.vnetConfiguration.infrastructureSubnetId" -o tsv 2>/dev/null || echo "")
+          
+          if [ -z "$CAE_VNET" ]; then
+            echo "⚠️  CAE does not have VNet Integration - keeping ingress external"
+            exit 0
+          fi
+          
+          az containerapp ingress enable --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+            --type internal --target-port ${{ env.CONTAINER_PORT }}
+          
+          sleep 20
+          
+          INTERNAL_FQDN=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.configuration.ingress.fqdn" -o tsv)
+          if [ -n "$INTERNAL_FQDN" ]; then
+            echo "microservice_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+            echo "MICROSERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+            echo "ARCS_SERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+          fi
+
+      - name: Setup SSH for VM access
+        run: |
+          # Instalar sshpass para autenticação por senha
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          
+          # Carregar configurações da VM do App Config
+          APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
+          
+          get_config_value() {
+            local key=$1
+            local secret_fallback=$2
+            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" --query "value" -o tsv 2>/dev/null || \
+            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --query "value" -o tsv 2>/dev/null || \
+            echo "$secret_fallback"
+          }
+          
+          VM_IP_HML2=$(get_config_value "VM_IP_HML2" "${{ secrets.VM_IP_HML2 }}")
+          VM_USER_HML2=$(get_config_value "VM_USER_HML2" "${{ secrets.VM_USER_HML2 }}")
+          
+          if [ -z "$VM_IP_HML2" ] || [ -z "$VM_USER_HML2" ]; then
+            echo "⚠️  VM credentials not found in App Config, trying secrets..."
+            VM_IP_HML2="${{ secrets.VM_IP_HML2 }}"
+            VM_USER_HML2="${{ secrets.VM_USER_HML2 }}"
+          fi
+          
+          if [ -z "$VM_IP_HML2" ] || [ -z "$VM_USER_HML2" ]; then
+            echo "❌ Erro: VM_IP_HML2 e VM_USER_HML2 são obrigatórios"
+            echo "Configure no App Config ou GitHub Secrets:"
+            echo "  - VM_IP_HML2: IP ou hostname da VM"
+            echo "  - VM_USER_HML2: Usuário SSH (ex: azureuser)"
+            exit 1
+          fi
+          
+          echo "VM_IP_HML2=$VM_IP_HML2" >> $GITHUB_ENV
+          echo "VM_USER_HML2=$VM_USER_HML2" >> $GITHUB_ENV
+          
+          # Obter senha SSH do Key Vault
+          KV_NAME="${{ env.ARCS_KV_NAME_HML2 }}"
+          SSH_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "VM-SSH-PASSWORD-HML2" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -z "$SSH_PASSWORD" ]; then
+            # Fallback para GitHub Secret
+            SSH_PASSWORD="${{ secrets.VM_SSH_PASSWORD_HML2 }}"
+          fi
+          
+          if [ -z "$SSH_PASSWORD" ]; then
+            echo "❌ Erro: Senha SSH não encontrada"
+            echo "Configure no Key Vault (VM-SSH-PASSWORD-HML2) ou GitHub Secret (VM_SSH_PASSWORD_HML2)"
+            exit 1
+          fi
+          
+          echo "SSH_PASSWORD=$SSH_PASSWORD" >> $GITHUB_ENV
+          
+          # Configurar known_hosts (evitar prompt de confirmação)
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -H "$VM_IP_HML2" >> ~/.ssh/known_hosts 2>/dev/null || true
+          chmod 600 ~/.ssh/known_hosts
+          
+          echo "✅ SSH configurado para $VM_USER_HML2@$VM_IP_HML2 (autenticação por senha)"
+
+      - name: Execute post_boot and register_microservice via SSH
+        run: |
+          # Obter URL do container (internal FQDN)
+          CONTAINER_URL="${{ env.microservice_url }}"
+          if [ -z "$CONTAINER_URL" ]; then
+            CONTAINER_URL=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.configuration.ingress.fqdn" -o tsv 2>/dev/null || echo "")
+            if [ -n "$CONTAINER_URL" ]; then
+              CONTAINER_URL="https://$CONTAINER_URL"
             fi
-            sleep 15
-          done
+          fi
           
-          for i in {1..5}; do
-            HTTP_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" -X POST "${{ env.microservice_url }}/lib/post_boot" \
-              -H "Authorization: TOKEN ${{ secrets.SECRET_ARCS_TOKEN }}" \
-              -H "Content-Type: application/json" \
-              --data-raw '{}' \
-              --max-time 60 --connect-timeout 30 2>/dev/null || echo "000")
+          if [ -z "$CONTAINER_URL" ]; then
+            echo "❌ Erro: Não foi possível obter URL do container"
+            exit 1
+          fi
+          
+          echo "Container URL: $CONTAINER_URL"
+          echo "VM: ${{ env.VM_USER_HML2 }}@${{ env.VM_IP_HML2 }}"
+          
+          # Obter senha SSH
+          KV_NAME="${{ env.ARCS_KV_NAME_HML2 }}"
+          SSH_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "VM-SSH-PASSWORD-HML2" --query value -o tsv 2>/dev/null || echo "${{ secrets.VM_SSH_PASSWORD_HML2 }}")
+          
+          if [ -z "$SSH_PASSWORD" ]; then
+            echo "❌ Erro: Senha SSH não encontrada"
+            exit 1
+          fi
+          
+          # Copiar script para VM usando senha
+          echo "📋 Copiando script para VM..."
+          sshpass -p "$SSH_PASSWORD" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            scripts/execute_container_requests.sh \
+            ${{ env.VM_USER_HML2 }}@${{ env.VM_IP_HML2 }}:/tmp/execute_container_requests.sh
+          
+          # Tornar script executável
+          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ${{ env.VM_USER_HML2 }}@${{ env.VM_IP_HML2 }} \
+            "chmod +x /tmp/execute_container_requests.sh"
+          
+          # Executar script na VM
+          echo "🚀 Executando script na VM..."
+          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ${{ env.VM_USER_HML2 }}@${{ env.VM_IP_HML2 }} \
+            "/tmp/execute_container_requests.sh '$CONTAINER_URL' '${{ secrets.SECRET_ARCS_TOKEN }}'"
+          
+          # Buscar resultados
+          echo "📥 Buscando resultados da VM..."
+          sshpass -p "$SSH_PASSWORD" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ${{ env.VM_USER_HML2 }}@${{ env.VM_IP_HML2 }}:/tmp/container_results.txt \
+            /tmp/container_results.txt 2>/dev/null || true
+          
+          # Exibir resultados
+          if [ -f /tmp/container_results.txt ]; then
+            echo ""
+            echo "=========================================="
+            echo "Resultados das requisições"
+            echo "=========================================="
+            cat /tmp/container_results.txt
+            echo ""
             
-            if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "201" ]; then
-              echo "✅ post_boot executed successfully"
-              break
+            # Carregar resultados como variáveis de ambiente
+            source /tmp/container_results.txt 2>/dev/null || true
+            
+            # Verificar se houve sucesso
+            if [ "${POST_BOOT_STATUS:-failed}" == "success" ] && [ "${REGISTER_STATUS:-failed}" == "success" ]; then
+              echo "✅ post_boot e register_microservice executados com sucesso!"
+            elif [ "${POST_BOOT_STATUS:-failed}" == "success" ]; then
+              echo "⚠️  post_boot OK, mas register_microservice falhou"
+            elif [ "${REGISTER_STATUS:-failed}" == "success" ]; then
+              echo "⚠️  register_microservice OK, mas post_boot falhou"
+            else
+              echo "❌ Ambos falharam"
+              exit 1
             fi
-            sleep $((i * 5))
-          done
+          else
+            echo "⚠️  Não foi possível obter resultados da VM"
+          fi
       
       - name: Change ingress to internal
         run: |
