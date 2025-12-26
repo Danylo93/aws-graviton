@@ -685,28 +685,20 @@ jobs:
           
           sleep 30
 
-      - name: Change ingress to internal
+      - name: Get Container App FQDN
         run: |
-          CAE_VNET=$(az containerapp env show --name ${{ env.ARCS_ENV_APP_HML2 }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.vnetConfiguration.infrastructureSubnetId" -o tsv 2>/dev/null || echo "")
-          
-          if [ -z "$CAE_VNET" ]; then
-            echo "⚠️  CAE does not have VNet Integration - keeping ingress external"
-            exit 0
-          fi
-          
-          az containerapp ingress enable --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --type internal --target-port ${{ env.CONTAINER_PORT }}
-          
-          sleep 20
-          
-          INTERNAL_FQDN=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.configuration.ingress.fqdn" -o tsv)
-          if [ -n "$INTERNAL_FQDN" ]; then
-            echo "microservice_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
-            echo "MICROSERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
-            echo "ARCS_SERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
+          # Obter FQDN do Container App (mantém externo para APIM externo acessar)
+          FQDN=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.configuration.ingress.fqdn" -o tsv)
+          if [ -n "$FQDN" ]; then
+            echo "microservice_url=https://$FQDN" >> $GITHUB_ENV
+            echo "MICROSERVICE_INTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
+            echo "ARCS_SERVICE_INTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
+            echo "✅ Container App FQDN: https://$FQDN (ingress externo)"
+          else
+            echo "⚠️  FQDN não encontrado"
           fi
 
-      - name: Setup SSH for VM access
+      - name: Setup VM access (autenticação por senha)
         run: |
           # Instalar sshpass para autenticação por senha
           sudo apt-get update -qq
@@ -743,22 +735,28 @@ jobs:
           echo "VM_IP_HML2=$VM_IP_HML2" >> $GITHUB_ENV
           echo "VM_USER_HML2=$VM_USER_HML2" >> $GITHUB_ENV
           
-          # Obter senha SSH do Key Vault
-          KV_NAME="${{ env.ARCS_KV_NAME_HML2 }}"
-          SSH_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "VM-SSH-PASSWORD-HML2" --query value -o tsv 2>/dev/null || echo "")
-          
-          if [ -z "$SSH_PASSWORD" ]; then
-            # Fallback para GitHub Secret
-            SSH_PASSWORD="${{ secrets.VM_SSH_PASSWORD_HML2 }}"
+          # Obter senha do Key Vault (não SSH, apenas senha da VM)
+          # Carregar nome do Key Vault do App Config se não estiver em env
+          if [ -z "${{ env.ARCS_KV_NAME_HML2 }}" ]; then
+            KV_NAME=$(get_config_value "ARCS_KV_NAME_HML2" "arcs-kv-hml2")
+          else
+            KV_NAME="${{ env.ARCS_KV_NAME_HML2 }}"
           fi
           
-          if [ -z "$SSH_PASSWORD" ]; then
-            echo "❌ Erro: Senha SSH não encontrada"
+          VM_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "VM-SSH-PASSWORD-HML2" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -z "$VM_PASSWORD" ]; then
+            # Fallback para GitHub Secret
+            VM_PASSWORD="${{ secrets.VM_SSH_PASSWORD_HML2 }}"
+          fi
+          
+          if [ -z "$VM_PASSWORD" ]; then
+            echo "❌ Erro: Senha da VM não encontrada"
             echo "Configure no Key Vault (VM-SSH-PASSWORD-HML2) ou GitHub Secret (VM_SSH_PASSWORD_HML2)"
             exit 1
           fi
           
-          echo "SSH_PASSWORD=$SSH_PASSWORD" >> $GITHUB_ENV
+          echo "SSH_PASSWORD=$VM_PASSWORD" >> $GITHUB_ENV
           
           # Configurar known_hosts (evitar prompt de confirmação)
           mkdir -p ~/.ssh
@@ -766,11 +764,11 @@ jobs:
           ssh-keyscan -H "$VM_IP_HML2" >> ~/.ssh/known_hosts 2>/dev/null || true
           chmod 600 ~/.ssh/known_hosts
           
-          echo "✅ SSH configurado para $VM_USER_HML2@$VM_IP_HML2 (autenticação por senha)"
+          echo "✅ Autenticação por senha configurada para $VM_USER_HML2@$VM_IP_HML2"
 
-      - name: Execute post_boot and register_microservice via SSH
+      - name: Execute post_boot and register_microservice via VM
         run: |
-          # Obter URL do container (internal FQDN)
+          # Obter URL do container (FQDN externo ou interno)
           CONTAINER_URL="${{ env.microservice_url }}"
           if [ -z "$CONTAINER_URL" ]; then
             CONTAINER_URL=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.configuration.ingress.fqdn" -o tsv 2>/dev/null || echo "")
@@ -787,12 +785,16 @@ jobs:
           echo "Container URL: $CONTAINER_URL"
           echo "VM: ${{ env.VM_USER_HML2 }}@${{ env.VM_IP_HML2 }}"
           
-          # Obter senha SSH
+          # Obter senha da VM
           KV_NAME="${{ env.ARCS_KV_NAME_HML2 }}"
+          if [ -z "$KV_NAME" ]; then
+            KV_NAME="arcs-kv-hml2"
+          fi
           SSH_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "VM-SSH-PASSWORD-HML2" --query value -o tsv 2>/dev/null || echo "${{ secrets.VM_SSH_PASSWORD_HML2 }}")
           
           if [ -z "$SSH_PASSWORD" ]; then
-            echo "❌ Erro: Senha SSH não encontrada"
+            echo "❌ Erro: Senha da VM não encontrada"
+            echo "Configure no Key Vault (VM-SSH-PASSWORD-HML2) ou GitHub Secret (VM_SSH_PASSWORD_HML2)"
             exit 1
           fi
           
@@ -844,27 +846,6 @@ jobs:
             fi
           else
             echo "⚠️  Não foi possível obter resultados da VM"
-          fi
-      
-      - name: Change ingress to internal
-        run: |
-          CAE_VNET=$(az containerapp env show --name ${{ env.ARCS_ENV_APP_HML2 }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.vnetConfiguration.infrastructureSubnetId" -o tsv 2>/dev/null || echo "")
-          
-          if [ -z "$CAE_VNET" ]; then
-            echo "⚠️  CAE does not have VNet Integration - keeping ingress external"
-            exit 0
-          fi
-          
-          az containerapp ingress enable --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-            --type internal --target-port ${{ env.CONTAINER_PORT }}
-          
-          sleep 20
-          
-          INTERNAL_FQDN=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.configuration.ingress.fqdn" -o tsv)
-          if [ -n "$INTERNAL_FQDN" ]; then
-            echo "microservice_url=https://$INTERNAL_FQDN" >> $GITHUB_ENV
-            echo "MICROSERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
-            echo "ARCS_SERVICE_INTERNAL_URL=https://$INTERNAL_FQDN" >> $GITHUB_ENV
           fi
 
       - name: Configure API in APIM
