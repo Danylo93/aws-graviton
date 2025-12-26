@@ -739,6 +739,11 @@ jobs:
           # Carregar nome do Key Vault do App Config (este step está no job settings, não tem acesso ao env do deploy)
           KV_NAME=$(get_config_value "ARCS_KV_NAME_HML2" "arcs-kv-hml2")
           
+          # Garantir que o nome está correto (sem typos)
+          if [ "$KV_NAME" == "arcs-kv-hm12" ] || [ "$KV_NAME" == "arcs-kv-hml" ]; then
+            KV_NAME="arcs-kv-hml2"
+          fi
+          
           echo "📋 Buscando senha no Key Vault: $KV_NAME"
           VM_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "VM-SSH-PASSWORD-HML2" --query value -o tsv 2>/dev/null || echo "")
           
