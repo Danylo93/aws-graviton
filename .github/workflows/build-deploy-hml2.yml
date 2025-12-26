@@ -609,7 +609,10 @@ jobs:
           }
           
           # Carregar secrets do Key Vault
-          KV_NAME="arcs-kv-hml2"
+          KV_NAME="${{ env.ARCS_KV_NAME_HML2 }}"
+          if [ -z "$KV_NAME" ]; then
+            KV_NAME="arcs-kv-hml2"
+          fi
           get_kv_secret() {
             local secret_name=$1
             az keyvault secret show --vault-name "$KV_NAME" --name "$secret_name" --query "value" -o tsv 2>/dev/null || echo ""
@@ -704,63 +707,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq sshpass
           
-          # Carregar configurações da VM do App Config
-          APP_CONFIG_NAME="appconfig-arcs-porschecup-hml2"
-          
-          get_config_value() {
-            local key=$1
-            local secret_fallback=$2
-            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --label "backend" --query "value" -o tsv 2>/dev/null || \
-            az appconfig kv show --name "$APP_CONFIG_NAME" --key "$key" --query "value" -o tsv 2>/dev/null || \
-            echo "$secret_fallback"
-          }
-          
-          VM_IP_HML2=$(get_config_value "VM_IP_HML2" "${{ secrets.VM_IP_HML2 }}")
-          VM_USER_HML2=$(get_config_value "VM_USER_HML2" "${{ secrets.VM_USER_HML2 }}")
-          
-          if [ -z "$VM_IP_HML2" ] || [ -z "$VM_USER_HML2" ]; then
-            echo "⚠️  VM credentials not found in App Config, trying secrets..."
-            VM_IP_HML2="${{ secrets.VM_IP_HML2 }}"
-            VM_USER_HML2="${{ secrets.VM_USER_HML2 }}"
-          fi
-          
-          if [ -z "$VM_IP_HML2" ] || [ -z "$VM_USER_HML2" ]; then
-            echo "❌ Erro: VM_IP_HML2 e VM_USER_HML2 são obrigatórios"
-            echo "Configure no App Config ou GitHub Secrets:"
-            echo "  - VM_IP_HML2: IP ou hostname da VM"
-            echo "  - VM_USER_HML2: Usuário SSH (ex: azureuser)"
-            exit 1
-          fi
+          # Valores hardcoded da VM (sem App Config ou Secrets)
+          VM_IP_HML2="10.40.13.100"
+          VM_USER_HML2="azureuser"
+          VM_PASSWORD="Jesus@2025@2026"
           
           echo "VM_IP_HML2=$VM_IP_HML2" >> $GITHUB_ENV
           echo "VM_USER_HML2=$VM_USER_HML2" >> $GITHUB_ENV
-          
-          # Obter senha do Key Vault (não SSH, apenas senha da VM)
-          # Carregar nome do Key Vault do App Config (este step está no job settings, não tem acesso ao env do deploy)
-          KV_NAME=$(get_config_value "ARCS_KV_NAME_HML2" "arcs-kv-hml2")
-          
-          # Garantir que o nome está correto (sem typos)
-          if [ "$KV_NAME" == "arcs-kv-hm12" ] || [ "$KV_NAME" == "arcs-kv-hml" ]; then
-            KV_NAME="arcs-kv-hml2"
-          fi
-          
-          echo "📋 Buscando senha no Key Vault: $KV_NAME"
-          VM_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "VM-SSH-PASSWORD-HML2" --query value -o tsv 2>/dev/null || echo "")
-          
-          if [ -z "$VM_PASSWORD" ]; then
-            echo "⚠️  Senha não encontrada no Key Vault, tentando GitHub Secret..."
-            # Fallback para GitHub Secret
-            VM_PASSWORD="${{ secrets.VM_SSH_PASSWORD_HML2 }}"
-          fi
-          
-          if [ -z "$VM_PASSWORD" ]; then
-            echo "❌ Erro: Senha da VM não encontrada"
-            echo "Configure no Key Vault ($KV_NAME/VM-SSH-PASSWORD-HML2) ou GitHub Secret (VM_SSH_PASSWORD_HML2)"
-            exit 1
-          fi
-          
-          echo "✅ Senha da VM encontrada"
           echo "SSH_PASSWORD=$VM_PASSWORD" >> $GITHUB_ENV
+          
+          echo "✅ Credenciais da VM configuradas (hardcoded)"
           
           # Configurar known_hosts (evitar prompt de confirmação)
           mkdir -p ~/.ssh
@@ -789,18 +745,8 @@ jobs:
           echo "Container URL: $CONTAINER_URL"
           echo "VM: ${{ env.VM_USER_HML2 }}@${{ env.VM_IP_HML2 }}"
           
-          # Obter senha da VM
-          KV_NAME="${{ env.ARCS_KV_NAME_HML2 }}"
-          if [ -z "$KV_NAME" ]; then
-            KV_NAME="arcs-kv-hml2"
-          fi
-          SSH_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "VM-SSH-PASSWORD-HML2" --query value -o tsv 2>/dev/null || echo "${{ secrets.VM_SSH_PASSWORD_HML2 }}")
-          
-          if [ -z "$SSH_PASSWORD" ]; then
-            echo "❌ Erro: Senha da VM não encontrada"
-            echo "Configure no Key Vault (VM-SSH-PASSWORD-HML2) ou GitHub Secret (VM_SSH_PASSWORD_HML2)"
-            exit 1
-          fi
+          # Senha da VM (hardcoded - sem Key Vault ou Secrets)
+          SSH_PASSWORD="Jesus@2025@2026"
           
           # Copiar script para VM usando senha
           echo "📋 Copiando script para VM..."
