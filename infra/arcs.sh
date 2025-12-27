@@ -55,9 +55,10 @@ convert_json_to_env() {
     fi
 
     # Converte JSON para o formato KEY="VALUE" e insere no .env
+    # Usa @json para preservar JSON strings corretamente
     while IFS= read -r line; do
         upsert_env "$line"
-    done < <(echo "$json_string" | jq -r 'to_entries | map("\(.key)=\(.value|tostring)") | .[]')
+    done < <(echo "$json_string" | jq -r 'to_entries | map("\(.key)=\(.value|@json)") | .[]')
 }
 
 ###################################################
@@ -153,16 +154,20 @@ upsert_env() {
         fi
 
         # Trata o valor conforme o tipo
+        # Remove aspas JSON se existirem (jq @json já adiciona aspas)
+        value=$(echo "$value" | sed 's/^"\(.*\)"$/\1/')
+        
         if [ "$value" = "null" ] || [ -z "$value" ] || [ "$value" = "\"\"" ]; then
             value=""
         elif echo "$value" | grep -Eq '^[+-]?[0-9]+(\.[0-9]+)?$'; then
-            # Valor numérico
+            # Valor numérico - não adiciona aspas
             value="$value"
         elif [ "$value" = "true" ] || [ "$value" = "false" ]; then
-            # Valor booleano
+            # Valor booleano - não adiciona aspas
             value="$value"
         elif echo "$value" | grep -Eq '^\{.*\}$|^\[.*\]$'; then
             # Se for JSON (começa com { ou [ e termina com } ou ])
+            # Preserva como está, sem aspas extras
             value="'$value'"
         else
             # Valor string, adiciona aspas

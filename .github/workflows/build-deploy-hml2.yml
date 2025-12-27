@@ -499,8 +499,8 @@ jobs:
             echo "✅ PostgreSQL connection user_${{ env.POSTGRES_DB_HML2 }} already exists"
           fi
           
-          # Configurar variáveis de ambiente do PostgreSQL
-          POSTGRES_HOST="${{ env.ARCS_POSTGRES_SERVER_HML2 }}.postgres.database.azure.com"
+          # Configurar variáveis de ambiente do PostgreSQL (usando FQDN privado)
+          POSTGRES_HOST="b83ac0e53ac6.private.postgres.database.azure.com"
           az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --set-env-vars \
             POSTGRES_HOST="$POSTGRES_HOST" POSTGRES_PORT="5432" POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
             POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" POSTGRES_SSLMODE="require" \
@@ -642,12 +642,12 @@ jobs:
             "REDIS_PORT=6379"
             "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}"
             "REDIS_SSL_PORT=6380"
-            "ENV=DEVELOPMENT"
+            "ENV=HOMOLOG"
           )
           
-          # Adicionar PostgreSQL HML2 se disponível
+          # Adicionar PostgreSQL HML2 se disponível (usando FQDN privado)
           if [ -n "$ARCS_POSTGRES_SERVER_HML2" ]; then
-            ENV_VARS+=("POSTGRES_HOST=${ARCS_POSTGRES_SERVER_HML2}.postgres.database.azure.com")
+            ENV_VARS+=("POSTGRES_HOST=b83ac0e53ac6.private.postgres.database.azure.com")
             ENV_VARS+=("POSTGRES_PORT=5432")
             ENV_VARS+=("POSTGRES_DB=${POSTGRES_DB_HML2}")
             ENV_VARS+=("POSTGRES_USER=${ARCS_POSTGRES_SERVER_HML2}-admin")
