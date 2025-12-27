@@ -26,3 +26,4 @@ from .technical_teams import TechnicalTeamController
 from .users import UserController
 from .pilots import PilotController
 from .user_guests import UserGuestController
+from .lib import LibController

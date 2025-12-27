@@ -122,8 +122,73 @@ tags:
     description: Management of contacts in application
     externalDocs:
       url: "/docs/key_contacts"
+  - name: Health
+    description: Health check endpoints
+    externalDocs:
+      description: Find out more
+      url: "/docs/health"
 
 paths:
+  /lib/health_check:
+    get:
+      tags:
+        - Health
+      summary: Health check endpoint
+      description: Check the health status of the service and its dependencies (PostgreSQL, MongoDB, Redis, Storage, DAPR)
+      security: []
+      parameters:
+        - name: resource_name
+          in: query
+          required: false
+          description: Optional resource name to check (POSTGRES, MONGODB, REDIS, STORAGE, DAPR)
+          schema:
+            type: string
+            enum: [POSTGRES, MONGODB, REDIS, STORAGE, DAPR]
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "SUCCESS"
+                  errors:
+                    type: object
+                    example: {}
+                  data:
+                    type: object
+                    properties:
+                      service:
+                        type: boolean
+                        example: true
+                      postgres:
+                        type: boolean
+                        example: true
+                      mongodb:
+                        type: boolean
+                        example: false
+                      redis:
+                        type: boolean
+                        example: true
+                      storage:
+                        type: boolean
+                        example: true
+                      dapr:
+                        type: boolean
+                        example: false
+                  links:
+                    type: array
+                    items:
+                      type: object
+                    example: []
+        '400':
+          $ref: "#/components/responses/400"
+        '500':
+          $ref: "#/components/responses/500"
+
   /access_profiles/:
     get:
       tags:
