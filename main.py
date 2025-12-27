@@ -29,8 +29,7 @@ from src.application import (
     TechnicalTeamController,
     UserController,
     PilotController,
-    UserGuestController,
-    LibController
+    UserGuestController
 )
 
 load_dotenv()
@@ -69,7 +68,6 @@ class ArcsService(ServiceFlask):
         "/user_guests": UserGuestController,
         "/contacts": ContactsController,
         "/addresses": AddressesController,
-        "/lib": LibController,
 
     }
     description_service: str = "Microservice core application for Arcs."
