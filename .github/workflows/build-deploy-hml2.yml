@@ -500,10 +500,12 @@ jobs:
           fi
           
           # Configurar variáveis de ambiente do PostgreSQL (usando FQDN privado)
+          # O Service Connector cria o usuário AAD como "aad_arcs_postgres" (baseado no connection name "arcs_postgres")
           POSTGRES_HOST="b83ac0e53ac6.private.postgres.database.azure.com"
           az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --set-env-vars \
             POSTGRES_HOST="$POSTGRES_HOST" POSTGRES_PORT="5432" POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
             POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" POSTGRES_SSLMODE="require" \
+            POSTGRES_AAD_USER="aad_arcs_postgres" \
               --output none
           
           # Web PubSub
@@ -652,6 +654,7 @@ jobs:
             ENV_VARS+=("POSTGRES_DB=${POSTGRES_DB_HML2}")
             ENV_VARS+=("POSTGRES_USER=${ARCS_POSTGRES_SERVER_HML2}-admin")
             ENV_VARS+=("POSTGRES_SSLMODE=require")
+            ENV_VARS+=("POSTGRES_AAD_USER=aad_arcs_postgres")
           fi
           if [ -n "$POSTGRES_PASSWORD_HML2" ]; then
             ENV_VARS+=("postgres_password=${POSTGRES_PASSWORD_HML2}")

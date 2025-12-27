@@ -32,7 +32,17 @@ def get_database_url():
         return TEST_DATABASE_URL
     elif ENV in ["PRODUCTION", "HOMOLOG"]:
         # Autenticação via Azure AD no ambiente de produção ou homologação
-        postgres_user = f"aad_user_{POSTGRES_DB}"
+        # O Service Connector cria o usuário AAD, geralmente como "aad_arcs_postgres" ou "aad_user_{POSTGRES_DB}"
+        # Tenta usar POSTGRES_AAD_USER se definido explicitamente
+        postgres_aad_user = os.getenv("POSTGRES_AAD_USER")
+        if postgres_aad_user:
+            postgres_user = postgres_aad_user
+        else:
+            # Tenta usar o padrão do Service Connector: "aad_arcs_postgres" ou "aad_user_{POSTGRES_DB}"
+            # Primeiro tenta "aad_arcs_postgres" (padrão do Service Connector quando connection name é "arcs_postgres")
+            # Se não funcionar, tenta "aad_user_{POSTGRES_DB}" (padrão antigo)
+            postgres_user = "aad_arcs_postgres"  # Padrão do Service Connector para connection name "arcs_postgres"
+        
         access_token = DefaultAzureCredential().get_token("https://ossrdbms-aad.database.windows.net/.default").token
         password = urllib.parse.quote_plus(access_token)
         return f"postgresql+psycopg://{postgres_user}:{password}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}?sslmode=require"
