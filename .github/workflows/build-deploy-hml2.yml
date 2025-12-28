@@ -502,10 +502,12 @@ jobs:
           # Configurar variáveis de ambiente do PostgreSQL (usando FQDN privado)
           # O Service Connector cria o usuário AAD como "aad_arcs_postgres" (baseado no connection name "arcs_postgres")
           POSTGRES_HOST="b83ac0e53ac6.private.postgres.database.azure.com"
+          # Adicionar KEY_VAULT_NAME (necessário para arcs_lib_pca construir a URL automaticamente)
           az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --set-env-vars \
             POSTGRES_HOST="$POSTGRES_HOST" POSTGRES_PORT="5432" POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
             POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" POSTGRES_SSLMODE="require" \
             POSTGRES_AAD_USER="aad_arcs_postgres" \
+            KEY_VAULT_NAME="${{ env.ARCS_KV_NAME_HML2 }}" \
               --output none
           
           # Web PubSub
