@@ -44,35 +44,54 @@ class ServicesController(BaseController):
         request=CreateServiceAuth,
         response=ServiceCreatedResponse)
     def create_service(self, req: CreateServiceAuth, resp: ServiceCreatedResponse):
-        if req.has_errors():
-            return resp(status_code=HTTPStatus.BAD_REQUEST, message="Invalid request")
+        import logging
+        logger = logging.getLogger(__name__)
         
-        service_repo = self.load_repository(ServiceModel)
+        try:
+            if req.has_errors():
+                logger.error(f"Request validation errors: {req.errors()}")
+                return resp(status_code=HTTPStatus.BAD_REQUEST, message="Invalid request")
+            
+            logger.info(f"Creating service: name={req.name}, internal_url={req.internal_url}, external_url={req.external_url}")
+            service_repo = self.load_repository(ServiceModel)
 
-        if service_repo.db.contains(name=req.name):
-            return resp(400, message="Service already exists")
-        
-        service_data = req.to_dict()
+            if service_repo.db.contains(name=req.name):
+                logger.warning(f"Service already exists: {req.name}")
+                return resp(400, message="Service already exists")
+            
+            service_data = req.to_dict()
+            logger.debug(f"Service data: {service_data}")
 
-        icon = None
-        if req.icon:
-            icon = service_repo.storage.add(req.icon)
-            service_data['icon_id'] = icon.id
+            icon = None
+            if req.icon:
+                logger.info("Adding icon to storage...")
+                icon = service_repo.storage.add(req.icon)
+                service_data['icon_id'] = icon.id
+                logger.info(f"Icon added: {icon.id}")
 
-        service_model = service_repo.db.add(service_data)
+            logger.info("Adding service to database...")
+            service_model = service_repo.db.add(service_data)
 
-        if not service_model:
-            if icon:
-                service_repo.storage.remove(icon.filename)
-            return resp(HTTPStatus.INTERNAL_SERVER_ERROR, message="Error creating Service")
+            if not service_model:
+                logger.error("Failed to create service in database")
+                if icon:
+                    service_repo.storage.remove(icon.filename)
+                return resp(HTTPStatus.INTERNAL_SERVER_ERROR, message="Error creating Service")
 
-        if not service_model.to_vo().upsert_in_redis(service_repo.redis):
-            if icon:
-                service_repo.storage.remove(icon.filename)
-            service_repo.db.remove_by_id(service_model.id)
-            return resp(HTTPStatus.INTERNAL_SERVER_ERROR, message="Error add App client in Redis")
+            logger.info(f"Service created in database: {service_model.id}")
+            logger.info("Upserting service in Redis...")
+            if not service_model.to_vo().upsert_in_redis(service_repo.redis):
+                logger.error("Failed to upsert service in Redis")
+                if icon:
+                    service_repo.storage.remove(icon.filename)
+                service_repo.db.remove_by_id(service_model.id)
+                return resp(HTTPStatus.INTERNAL_SERVER_ERROR, message="Error add App client in Redis")
 
-        return resp(HTTPStatus.CREATED, service_model, "Created Succefully")
+            logger.info(f"Service created successfully: {service_model.id}")
+            return resp(HTTPStatus.CREATED, service_model, "Created Succefully")
+        except Exception as e:
+            logger.exception(f"Unexpected error creating service: {e}")
+            return resp(HTTPStatus.INTERNAL_SERVER_ERROR, message=f"Internal server error: {str(e)}")
     
     @BaseController.route(
         path="/<path:service_id>",
