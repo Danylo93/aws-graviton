@@ -45,14 +45,27 @@ class ServicesController(BaseController):
         response=ServiceCreatedResponse)
     def create_service(self, req: CreateServiceAuth, resp: ServiceCreatedResponse):
         import logging
+        import sys
         logger = logging.getLogger(__name__)
+        logger.setLevel(logging.DEBUG)
+        
+        # Forçar output para stdout/stderr
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
         
         try:
+            logger.error("=" * 60)
+            logger.error("CREATE_SERVICE CALLED")
+            logger.error("=" * 60)
+            
             if req.has_errors():
                 logger.error(f"Request validation errors: {req.errors()}")
                 return resp(status_code=HTTPStatus.BAD_REQUEST, message="Invalid request")
             
-            logger.info(f"Creating service: name={req.name}, internal_url={req.internal_url}, external_url={req.external_url}")
+            logger.error(f"Creating service: name={req.name}, internal_url={req.internal_url}, external_url={req.external_url}")
             service_repo = self.load_repository(ServiceModel)
 
             if service_repo.db.contains(name=req.name):
