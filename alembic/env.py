@@ -44,10 +44,25 @@ def get_database_url():
             postgres_user = "aad_arcs_postgres"  # Padrão do Service Connector para connection name "arcs_postgres"
         
         # Tentar usar ClientSecretCredential se as variáveis estiverem disponíveis
-        # Caso contrário, usar DefaultAzureCredential
+        # O Service Connector cria variáveis específicas como AZURE_POSTGRESQL_USER_ARCS_DB_CLIENTID
+        # Mas também pode ter variáveis genéricas AZURE_CLIENT_ID
         azure_client_id = os.getenv("AZURE_CLIENT_ID")
         azure_client_secret = os.getenv("AZURE_CLIENT_SECRET")
         azure_tenant_id = os.getenv("AZURE_TENANT_ID")
+        
+        # Se não tiver variáveis genéricas, tentar usar as variáveis específicas do Service Connector
+        if not azure_client_id:
+            # Procurar por variáveis do Service Connector (padrão: AZURE_POSTGRESQL_<CONNECTION_NAME>_CLIENTID)
+            # Para connection "user_arcs_db", será AZURE_POSTGRESQL_USER_ARCS_DB_CLIENTID
+            for key in os.environ:
+                if key.startswith("AZURE_POSTGRESQL_") and key.endswith("_CLIENTID"):
+                    azure_client_id = os.getenv(key)
+                    # Tentar obter SECRET e TENANTID correspondentes
+                    secret_key = key.replace("_CLIENTID", "_CLIENTSECRET")
+                    tenant_key = key.replace("_CLIENTID", "_TENANTID")
+                    azure_client_secret = os.getenv(secret_key) or azure_client_secret
+                    azure_tenant_id = os.getenv(tenant_key) or azure_tenant_id
+                    break
         
         if azure_client_id and azure_client_secret and azure_tenant_id:
             # Usar ClientSecretCredential quando as variáveis estão disponíveis

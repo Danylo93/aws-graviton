@@ -488,17 +488,18 @@ jobs:
           
           # Configurar variáveis de ambiente do PostgreSQL (usando FQDN privado)
           # O Service Connector cria o usuário AAD como "aad_user_arcs_db" (baseado no connection name "user_arcs_db")
+          # O Service Connector também cria automaticamente as variáveis:
+          # - AZURE_POSTGRESQL_USER_ARCS_DB_CLIENTID
+          # - AZURE_POSTGRESQL_USER_ARCS_DB_CLIENTSECRET
+          # - AZURE_POSTGRESQL_USER_ARCS_DB_TENANTID
+          # Não precisamos definir essas variáveis manualmente, o Service Connector já as cria
           POSTGRES_HOST="b83ac0e53ac6.private.postgres.database.azure.com"
           # Adicionar KEY_VAULT_NAME (necessário para arcs_lib_pca construir a URL automaticamente)
-          # Adicionar variáveis genéricas para DefaultAzureCredential usar o Service Principal do PostgreSQL
           az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --set-env-vars \
             POSTGRES_HOST="$POSTGRES_HOST" POSTGRES_PORT="5432" POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
             POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" POSTGRES_SSLMODE="require" \
             POSTGRES_AAD_USER="aad_user_${{ env.POSTGRES_DB_HML2 }}" \
             KEY_VAULT_NAME="${{ env.ARCS_KV_NAME_HML2 }}" \
-            AZURE_CLIENT_ID="secretref:azure-postgresql-user-arcs-db-clientid" \
-            AZURE_CLIENT_SECRET="secretref:azure-postgresql-user-arcs-db-clientsecret" \
-            AZURE_TENANT_ID="secretref:azure-postgresql-user-arcs-db-tenantid" \
               --output none
           
           # Web PubSub
@@ -641,6 +642,9 @@ jobs:
           )
           
           # Adicionar PostgreSQL HML2 se disponível (usando FQDN privado)
+          # Nota: O Service Connector cria automaticamente as variáveis AZURE_POSTGRESQL_USER_ARCS_DB_*
+          # Não precisamos definir AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID manualmente
+          # O código pode usar as variáveis específicas do Service Connector ou POSTGRES_AAD_USER
           if [ -n "$ARCS_POSTGRES_SERVER_HML2" ]; then
             ENV_VARS+=("POSTGRES_HOST=b83ac0e53ac6.private.postgres.database.azure.com")
             ENV_VARS+=("POSTGRES_PORT=5432")
@@ -648,10 +652,6 @@ jobs:
             ENV_VARS+=("POSTGRES_USER=${ARCS_POSTGRES_SERVER_HML2}-admin")
             ENV_VARS+=("POSTGRES_SSLMODE=require")
             ENV_VARS+=("POSTGRES_AAD_USER=aad_user_${POSTGRES_DB_HML2}")
-            # Adicionar variáveis genéricas para DefaultAzureCredential usar o Service Principal
-            ENV_VARS+=("AZURE_CLIENT_ID=secretref:azure-postgresql-user-arcs-db-clientid")
-            ENV_VARS+=("AZURE_CLIENT_SECRET=secretref:azure-postgresql-user-arcs-db-clientsecret")
-            ENV_VARS+=("AZURE_TENANT_ID=secretref:azure-postgresql-user-arcs-db-tenantid")
           fi
           if [ -n "$POSTGRES_PASSWORD_HML2" ]; then
             ENV_VARS+=("postgres_password=${POSTGRES_PASSWORD_HML2}")
