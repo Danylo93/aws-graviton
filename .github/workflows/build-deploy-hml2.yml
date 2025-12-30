@@ -643,6 +643,18 @@ jobs:
             STORAGE_KEY_HML2=$(get_kv_secret "STORAGE-KEY-HML2")
           fi
           
+          # Obter SECRET_ARCS_TOKEN do Key Vault (shared-secret-microservices) ou Secrets
+          # O código adiciona automaticamente o prefixo "TOKEN " quando busca do Key Vault
+          # Mas se definirmos como variável de ambiente, precisamos adicionar o prefixo manualmente
+          SECRET_ARCS_TOKEN_RAW=$(get_kv_secret "shared-secret-microservices" || echo "${{ secrets.SECRET_ARCS_TOKEN }}")
+          
+          # Adicionar prefixo "TOKEN " se não tiver
+          if [[ ! "$SECRET_ARCS_TOKEN_RAW" =~ ^TOKEN[[:space:]] ]]; then
+            SECRET_ARCS_TOKEN_HML2="TOKEN $SECRET_ARCS_TOKEN_RAW"
+          else
+            SECRET_ARCS_TOKEN_HML2="$SECRET_ARCS_TOKEN_RAW"
+          fi
+          
           # Construir lista de variáveis de ambiente
           ENV_VARS=(
             "MICROSERVICE_INTERNAL_URL=${{ env.MICROSERVICE_INTERNAL_URL }}"
@@ -654,6 +666,7 @@ jobs:
             "REDIS_PASSWORD=${{ env.REDIS_PASSWORD_HML2 }}"
             "REDIS_SSL_PORT=6380"
             "ENV=HOMOLOG"
+            "SECRET_ARCS_TOKEN=$SECRET_ARCS_TOKEN_HML2"
           )
           
           # Adicionar PostgreSQL HML2 se disponível (usando FQDN privado)
