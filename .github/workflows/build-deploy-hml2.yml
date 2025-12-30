@@ -482,7 +482,18 @@ jobs:
           fi
           
           # Criar conexão PostgreSQL com service-principal (formato exato do HML)
-          # Verificar se conexão já existe
+          # Verificar se conexão antiga (arcs_postgres) existe e deletar se necessário
+          if az containerapp connection show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --connection arcs_postgres --output none 2>/dev/null; then
+            echo "⚠️  Conexão antiga 'arcs_postgres' encontrada, deletando..."
+            az containerapp connection delete \
+              --name ${{ env.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
+              --connection arcs_postgres \
+              --yes 2>/dev/null || true
+            sleep 5
+          fi
+          
+          # Verificar se conexão correta já existe
           if ! az containerapp connection show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --connection user_${{ env.POSTGRES_DB_HML2 }} --output none 2>/dev/null; then
             echo "🔗 Creating PostgreSQL connection user_${{ env.POSTGRES_DB_HML2 }}..."
             echo "   Using CLIENT_ID: ${AZURE_CLIENT_ID:0:8}..."
@@ -503,11 +514,15 @@ jobs:
           # O Service Connector cria o usuário AAD como "aad_arcs_postgres" (baseado no connection name "arcs_postgres")
           POSTGRES_HOST="b83ac0e53ac6.private.postgres.database.azure.com"
           # Adicionar KEY_VAULT_NAME (necessário para arcs_lib_pca construir a URL automaticamente)
+          # Adicionar variáveis genéricas para DefaultAzureCredential usar o Service Principal do PostgreSQL
           az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --set-env-vars \
             POSTGRES_HOST="$POSTGRES_HOST" POSTGRES_PORT="5432" POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
             POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" POSTGRES_SSLMODE="require" \
             POSTGRES_AAD_USER="aad_arcs_postgres" \
             KEY_VAULT_NAME="${{ env.ARCS_KV_NAME_HML2 }}" \
+            AZURE_CLIENT_ID="secretref:azure-postgresql-clientid" \
+            AZURE_CLIENT_SECRET="secretref:azure-postgresql-clientsecret" \
+            AZURE_TENANT_ID="secretref:azure-postgresql-tenantid" \
               --output none
           
           # Web PubSub
@@ -657,6 +672,10 @@ jobs:
             ENV_VARS+=("POSTGRES_USER=${ARCS_POSTGRES_SERVER_HML2}-admin")
             ENV_VARS+=("POSTGRES_SSLMODE=require")
             ENV_VARS+=("POSTGRES_AAD_USER=aad_arcs_postgres")
+            # Adicionar variáveis genéricas para DefaultAzureCredential usar o Service Principal
+            ENV_VARS+=("AZURE_CLIENT_ID=secretref:azure-postgresql-clientid")
+            ENV_VARS+=("AZURE_CLIENT_SECRET=secretref:azure-postgresql-clientsecret")
+            ENV_VARS+=("AZURE_TENANT_ID=secretref:azure-postgresql-tenantid")
           fi
           if [ -n "$POSTGRES_PASSWORD_HML2" ]; then
             ENV_VARS+=("postgres_password=${POSTGRES_PASSWORD_HML2}")

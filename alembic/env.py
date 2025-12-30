@@ -5,7 +5,7 @@ from logging.config import fileConfig
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, engine_from_config, pool, text
 from alembic import context
-from azure.identity import DefaultAzureCredential
+from azure.identity import DefaultAzureCredential, ClientSecretCredential
 
 from arcs_lib_pca.infrastructure.model.postgresql_model import PostgreSqlModel
 from src.infrastructure import models  # Certifique-se de que os modelos estão carregados
@@ -43,7 +43,24 @@ def get_database_url():
             # Se não funcionar, tenta "aad_user_{POSTGRES_DB}" (padrão antigo)
             postgres_user = "aad_arcs_postgres"  # Padrão do Service Connector para connection name "arcs_postgres"
         
-        access_token = DefaultAzureCredential().get_token("https://ossrdbms-aad.database.windows.net/.default").token
+        # Tentar usar ClientSecretCredential se as variáveis estiverem disponíveis
+        # Caso contrário, usar DefaultAzureCredential
+        azure_client_id = os.getenv("AZURE_CLIENT_ID")
+        azure_client_secret = os.getenv("AZURE_CLIENT_SECRET")
+        azure_tenant_id = os.getenv("AZURE_TENANT_ID")
+        
+        if azure_client_id and azure_client_secret and azure_tenant_id:
+            # Usar ClientSecretCredential quando as variáveis estão disponíveis
+            credential = ClientSecretCredential(
+                tenant_id=azure_tenant_id,
+                client_id=azure_client_id,
+                client_secret=azure_client_secret
+            )
+        else:
+            # Fallback para DefaultAzureCredential
+            credential = DefaultAzureCredential()
+        
+        access_token = credential.get_token("https://ossrdbms-aad.database.windows.net/.default").token
         password = urllib.parse.quote_plus(access_token)
         return f"postgresql+psycopg://{postgres_user}:{password}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}?sslmode=require"
     else:

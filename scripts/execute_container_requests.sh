@@ -77,6 +77,11 @@ HEALTH_CODE=$?
 echo "" > /tmp/container_results.txt
 
 if [ $HEALTH_CODE -eq 0 ]; then
+  # Exibir JSON completo quando status for 200
+  echo "✅ Health check retornou status 200:"
+  echo "$HEALTH_RESPONSE" | jq '.' 2>/dev/null || echo "$HEALTH_RESPONSE"
+  echo ""
+  
   POSTGRES_OK=$(echo "$HEALTH_RESPONSE" | grep -o '"postgres":[^,}]*' | grep -o 'true' || echo "")
   REDIS_OK=$(echo "$HEALTH_RESPONSE" | grep -o '"redis":[^,}]*' | grep -o 'true' || echo "")
   
@@ -87,9 +92,16 @@ if [ $HEALTH_CODE -eq 0 ]; then
     echo "⚠️  Health check parcial (PostgreSQL: ${POSTGRES_OK:-false}, Redis: ${REDIS_OK:-false})"
     echo "HEALTH_STATUS=partial" >> /tmp/container_results.txt
   fi
+  
+  # Sempre salvar resposta completa no arquivo de resultados
+  echo "HEALTH_HTTP_CODE=200" >> /tmp/container_results.txt
+  echo "HEALTH_RESPONSE<<EOF" >> /tmp/container_results.txt
+  echo "$HEALTH_RESPONSE" >> /tmp/container_results.txt
+  echo "EOF" >> /tmp/container_results.txt
 else
   echo "⚠️  Health check falhou, mas continuando..."
   echo "HEALTH_STATUS=failed" >> /tmp/container_results.txt
+  echo "HEALTH_HTTP_CODE=000" >> /tmp/container_results.txt
   echo "HEALTH_RESPONSE<<EOF" >> /tmp/container_results.txt
   echo "$HEALTH_RESPONSE" >> /tmp/container_results.txt
   echo "EOF" >> /tmp/container_results.txt
