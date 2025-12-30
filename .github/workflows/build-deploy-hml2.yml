@@ -591,6 +591,20 @@ jobs:
           echo "microservice_url=https://$FQDN" >> $GITHUB_ENV
           echo "MICROSERVICE_INTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
           echo "ARCS_SERVICE_INTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
+          
+          # Definir URL externa (usar APIM se disponível, senão usar URL interna)
+          if [ -n "${{ env.APIM_NAME_HML2 }}" ]; then
+            APIM_GATEWAY_URL=$(az apim show --name "${{ env.APIM_NAME_HML2 }}" --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --query "properties.gatewayUrl" -o tsv 2>/dev/null || echo "")
+            if [ -n "$APIM_GATEWAY_URL" ]; then
+              API_PATH="${{ vars.APIM_API_ROUTE_PATH }}"
+              [ -z "$API_PATH" ] && API_PATH="/$(echo ${{ env.CONTAINER_APP_NAME }} | tr '[:upper:]' '[:lower:]')"
+              echo "MICROSERVICE_EXTERNAL_URL=${APIM_GATEWAY_URL}${API_PATH}" >> $GITHUB_ENV
+            else
+              echo "MICROSERVICE_EXTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
+            fi
+          else
+            echo "MICROSERVICE_EXTERNAL_URL=https://$FQDN" >> $GITHUB_ENV
+          fi
       
       - name: Update Container App env vars
         run: |
@@ -632,6 +646,7 @@ jobs:
           # Construir lista de variáveis de ambiente
           ENV_VARS=(
             "MICROSERVICE_INTERNAL_URL=${{ env.MICROSERVICE_INTERNAL_URL }}"
+            "MICROSERVICE_EXTERNAL_URL=${{ env.MICROSERVICE_EXTERNAL_URL }}"
             "ARCS_SERVICE_INTERNAL_URL=${{ env.ARCS_SERVICE_INTERNAL_URL }}"
             "MICROSERVICE_PORT=8000"
             "REDIS_HOST=redis-arcs-porschecup-hml2.redis.cache.windows.net"
