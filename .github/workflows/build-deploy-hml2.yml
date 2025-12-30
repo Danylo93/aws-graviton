@@ -390,48 +390,8 @@ jobs:
             
             # Verificar se conexão existe
             if az containerapp connection show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --connection "$conn_name" --output none 2>/dev/null; then
-              # Verificar se foi criada com service-principal (verificando se tem variáveis CLIENTID)
-              # Se não tiver, deletar e recriar
-              ENV_VAR_NAME=""
-              case "$conn_name" in
-                "arcsstorage")
-                  ENV_VAR_NAME="AZURE_STORAGEBLOB_CLIENTID"
-                  ;;
-                "arcs_kv")
-                  ENV_VAR_NAME="AZURE_KEYVAULT_CLIENTID"
-                  ;;
-                "user_arcs_db"|"user_"*)
-                  ENV_VAR_NAME="AZURE_POSTGRESQL_CLIENTID"
-                  ;;
-                "arcs_pubsub")
-                  ENV_VAR_NAME="AZURE_WEBPUBSUB_CLIENTID"
-                  ;;
-              esac
-              
-              if [ -n "$ENV_VAR_NAME" ]; then
-                HAS_CLIENTID=$(az containerapp show \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$RG_NAME" \
-                  --query "properties.template.containers[0].env[?name=='$ENV_VAR_NAME']" \
-                  -o json 2>/dev/null | grep -q "$ENV_VAR_NAME" && echo "yes" || echo "no")
-                
-                if [ "$HAS_CLIENTID" == "no" ]; then
-                  echo "⚠️  Connection $conn_name exists but was created without --service-principal"
-                  echo "   Deleting to recreate with --service-principal..."
-                  az containerapp connection delete \
-              --name "$CONTAINER_APP_NAME" \
-            --resource-group "$RG_NAME" \
-                    --connection "$conn_name" \
-                    --yes 2>/dev/null || true
-                  sleep 5
-                else
-                  echo "✅ Connection $conn_name already exists with service-principal, skipping..."
-                  return 0
-            fi
-          else
-                echo "✅ Connection $conn_name already exists, skipping..."
-                return 0
-              fi
+              echo "✅ Connection $conn_name already exists, skipping..."
+              return 0
             fi
             
             echo "🔗 Creating connection $conn_name..."
@@ -482,47 +442,63 @@ jobs:
           fi
           
           # Criar conexão PostgreSQL com service-principal (formato exato do HML)
-          # Verificar se conexão antiga (arcs_postgres) existe e deletar se necessário
-          if az containerapp connection show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --connection arcs_postgres --output none 2>/dev/null; then
-            echo "⚠️  Conexão antiga 'arcs_postgres' encontrada, deletando..."
-            az containerapp connection delete \
-              --name ${{ env.CONTAINER_APP_NAME }} \
-              --resource-group ${{ env.RG_NAME_ARCS_HML2 }} \
-              --connection arcs_postgres \
-              --yes 2>/dev/null || true
-            sleep 5
-          fi
-          
-          # Verificar se conexão correta já existe
+          # Verificar se conexão já existe
           if ! az containerapp connection show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RG_NAME_ARCS_HML2 }} --connection user_${{ env.POSTGRES_DB_HML2 }} --output none 2>/dev/null; then
             echo "🔗 Creating PostgreSQL connection user_${{ env.POSTGRES_DB_HML2 }}..."
             echo "   Using CLIENT_ID: ${AZURE_CLIENT_ID:0:8}..."
             echo "   Using OBJECT_ID: ${AZURE_CLIENT_OBJECT_ID:0:8}..."
             echo "   Using SECRET: ${AZURE_CLIENT_SECRET:+SET}${AZURE_CLIENT_SECRET:-NOT SET}"
-            az containerapp connection create postgres-flexible \
-              --target-id ${{ env.AZURE_PATH_PROVIDERS }}/Microsoft.DBforPostgreSQL/flexibleServers/${{ env.ARCS_POSTGRES_SERVER_HML2 }}/databases/${{ env.POSTGRES_DB_HML2 }} \
-              --source-id ${{ env.CONTAINER_APP_SOURCE_ID }} \
-              --container ${{ env.CONTAINER_APP_NAME }} \
-              --connection user_${{ env.POSTGRES_DB_HML2 }} \
-              --client-type python \
-              --service-principal client-id="$AZURE_CLIENT_ID" object-id="$AZURE_CLIENT_OBJECT_ID" secret="$AZURE_CLIENT_SECRET"
+            
+            # Validar se todas as credenciais estão disponíveis
+            if [ -z "$AZURE_CLIENT_ID" ] || [ -z "$AZURE_CLIENT_SECRET" ]; then
+              echo "❌ Erro: AZURE_CLIENT_ID ou AZURE_CLIENT_SECRET não estão disponíveis"
+              echo "   AZURE_CLIENT_ID length: ${#AZURE_CLIENT_ID}"
+              echo "   AZURE_CLIENT_SECRET length: ${#AZURE_CLIENT_SECRET}"
+              exit 1
+            fi
+            
+            # Debug: verificar se as variáveis estão definidas
+            echo "   Debug - CLIENT_ID definido: $([ -n "$AZURE_CLIENT_ID" ] && echo 'SIM' || echo 'NÃO')"
+            echo "   Debug - SECRET definido: $([ -n "$AZURE_CLIENT_SECRET" ] && echo 'SIM' || echo 'NÃO')"
+            echo "   Debug - OBJECT_ID definido: $([ -n "$AZURE_CLIENT_OBJECT_ID" ] && echo 'SIM' || echo 'NÃO')"
+            
+            # Criar conexão PostgreSQL
+            if [ -n "$AZURE_CLIENT_OBJECT_ID" ]; then
+              # Com OBJECT_ID
+              az containerapp connection create postgres-flexible \
+                --target-id ${{ env.AZURE_PATH_PROVIDERS }}/Microsoft.DBforPostgreSQL/flexibleServers/${{ env.ARCS_POSTGRES_SERVER_HML2 }}/databases/${{ env.POSTGRES_DB_HML2 }} \
+                --source-id ${{ env.CONTAINER_APP_SOURCE_ID }} \
+                --container ${{ env.CONTAINER_APP_NAME }} \
+                --connection user_${{ env.POSTGRES_DB_HML2 }} \
+                --client-type python \
+                --service-principal client-id=$AZURE_CLIENT_ID object-id=$AZURE_CLIENT_OBJECT_ID secret=$AZURE_CLIENT_SECRET
+            else
+              # Sem OBJECT_ID
+              az containerapp connection create postgres-flexible \
+                --target-id ${{ env.AZURE_PATH_PROVIDERS }}/Microsoft.DBforPostgreSQL/flexibleServers/${{ env.ARCS_POSTGRES_SERVER_HML2 }}/databases/${{ env.POSTGRES_DB_HML2 }} \
+                --source-id ${{ env.CONTAINER_APP_SOURCE_ID }} \
+                --container ${{ env.CONTAINER_APP_NAME }} \
+                --connection user_${{ env.POSTGRES_DB_HML2 }} \
+                --client-type python \
+                --service-principal client-id=$AZURE_CLIENT_ID secret=$AZURE_CLIENT_SECRET
+            fi
           else
             echo "✅ PostgreSQL connection user_${{ env.POSTGRES_DB_HML2 }} already exists"
           fi
           
           # Configurar variáveis de ambiente do PostgreSQL (usando FQDN privado)
-          # O Service Connector cria o usuário AAD como "aad_arcs_postgres" (baseado no connection name "arcs_postgres")
+          # O Service Connector cria o usuário AAD como "aad_user_arcs_db" (baseado no connection name "user_arcs_db")
           POSTGRES_HOST="b83ac0e53ac6.private.postgres.database.azure.com"
           # Adicionar KEY_VAULT_NAME (necessário para arcs_lib_pca construir a URL automaticamente)
           # Adicionar variáveis genéricas para DefaultAzureCredential usar o Service Principal do PostgreSQL
           az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --set-env-vars \
             POSTGRES_HOST="$POSTGRES_HOST" POSTGRES_PORT="5432" POSTGRES_DB="${{ env.POSTGRES_DB_HML2 }}" \
             POSTGRES_USER="${{ env.ARCS_POSTGRES_SERVER_HML2 }}-admin" POSTGRES_SSLMODE="require" \
-            POSTGRES_AAD_USER="aad_arcs_postgres" \
+            POSTGRES_AAD_USER="aad_user_${{ env.POSTGRES_DB_HML2 }}" \
             KEY_VAULT_NAME="${{ env.ARCS_KV_NAME_HML2 }}" \
-            AZURE_CLIENT_ID="secretref:azure-postgresql-clientid" \
-            AZURE_CLIENT_SECRET="secretref:azure-postgresql-clientsecret" \
-            AZURE_TENANT_ID="secretref:azure-postgresql-tenantid" \
+            AZURE_CLIENT_ID="secretref:azure-postgresql-user-arcs-db-clientid" \
+            AZURE_CLIENT_SECRET="secretref:azure-postgresql-user-arcs-db-clientsecret" \
+            AZURE_TENANT_ID="secretref:azure-postgresql-user-arcs-db-tenantid" \
               --output none
           
           # Web PubSub
@@ -671,11 +647,11 @@ jobs:
             ENV_VARS+=("POSTGRES_DB=${POSTGRES_DB_HML2}")
             ENV_VARS+=("POSTGRES_USER=${ARCS_POSTGRES_SERVER_HML2}-admin")
             ENV_VARS+=("POSTGRES_SSLMODE=require")
-            ENV_VARS+=("POSTGRES_AAD_USER=aad_arcs_postgres")
+            ENV_VARS+=("POSTGRES_AAD_USER=aad_user_${POSTGRES_DB_HML2}")
             # Adicionar variáveis genéricas para DefaultAzureCredential usar o Service Principal
-            ENV_VARS+=("AZURE_CLIENT_ID=secretref:azure-postgresql-clientid")
-            ENV_VARS+=("AZURE_CLIENT_SECRET=secretref:azure-postgresql-clientsecret")
-            ENV_VARS+=("AZURE_TENANT_ID=secretref:azure-postgresql-tenantid")
+            ENV_VARS+=("AZURE_CLIENT_ID=secretref:azure-postgresql-user-arcs-db-clientid")
+            ENV_VARS+=("AZURE_CLIENT_SECRET=secretref:azure-postgresql-user-arcs-db-clientsecret")
+            ENV_VARS+=("AZURE_TENANT_ID=secretref:azure-postgresql-user-arcs-db-tenantid")
           fi
           if [ -n "$POSTGRES_PASSWORD_HML2" ]; then
             ENV_VARS+=("postgres_password=${POSTGRES_PASSWORD_HML2}")
