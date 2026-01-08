@@ -167,7 +167,7 @@ class LoadSubGroupUseCase(UseCase[t.Optional[SubGroupModel]]):
         app_client_group_permissions = app_client_group_permissions_repo.db.find(group_id=group_model.id, load=['app_client'])
 
         if not app_client_group_permissions:
-            raise RuntimeError('Error to load AppClientGroupPermissions')
+           return []
 
         app_clients = [
             app_client_group_permission.app_client for app_client_group_permission in app_client_group_permissions
