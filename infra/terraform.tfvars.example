@@ -1,0 +1,3 @@
+region          = "us-east-1"
+ssh_cidr        = "203.0.113.10/32" # troque pelo IPv4 público do WSL/runner
+public_key_path = "~/.ssh/graviton_lab.pub"

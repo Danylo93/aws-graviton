@@ -1,0 +1,73 @@
+stages: [test, compile, image, deploy]
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "master"'
+
+unit_test:
+  stage: test
+  image: golang:1.22-alpine
+  script:
+    - go test ./...
+    - go vet ./...
+
+compile_arm64:
+  stage: compile
+  image: golang:1.22-alpine
+  needs: [unit_test]
+  script:
+    - mkdir -p bin
+    - CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o bin/server ./app
+    - test "$(od -An -tx1 -j 18 -N 2 bin/server | tr -d ' \n')" = b700 # ELF e_machine 183 (AArch64)
+  artifacts:
+    expire_in: 1 day
+    paths: [bin/server]
+
+build_arm64_image:
+  stage: image
+  image: docker:27-cli
+  services:
+    - name: docker:27-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  needs:
+    - job: compile_arm64
+      artifacts: true
+  script:
+    - docker info
+    - docker build --platform linux/arm64 --build-arg COMMIT="$CI_COMMIT_SHA" -t "graviton-lab:$CI_COMMIT_SHA" .
+    - test "$(docker image inspect "graviton-lab:$CI_COMMIT_SHA" --format '{{.Architecture}}')" = arm64
+    - docker save "graviton-lab:$CI_COMMIT_SHA" | gzip -1 > "graviton-lab-$CI_COMMIT_SHA.tar.gz"
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - graviton-lab-*.tar.gz
+
+deploy_aws:
+  stage: deploy
+  # Runner próprio no WSL, com tag local-deploy e acesso SSH ao IP permitido na AWS.
+  tags: [local-deploy]
+  needs:
+    - job: build_arm64_image
+      artifacts: true
+  environment:
+    name: lab
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master" && $CI_PIPELINE_SOURCE == "push"'
+      when: manual
+    - when: never
+  resource_group: graviton-lab
+  script:
+    - test -n "${EC2_HOST:-}" && test -n "${SSH_PRIVATE_KEY:-}" && test -n "${SSH_KNOWN_HOSTS:-}"
+    - test -f "$SSH_PRIVATE_KEY"
+    - install -m 700 -d "$HOME/.ssh"
+    - install -m 600 "$SSH_PRIVATE_KEY" "$HOME/.ssh/graviton_lab"
+    - printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+    - chmod 600 "$HOME/.ssh/known_hosts"
+    - scp -o StrictHostKeyChecking=yes -i "$HOME/.ssh/graviton_lab" "graviton-lab-$CI_COMMIT_SHA.tar.gz" "ec2-user@$EC2_HOST:/tmp/graviton-lab-$CI_COMMIT_SHA.tar.gz"
+    - ssh -o StrictHostKeyChecking=yes -i "$HOME/.ssh/graviton_lab" "ec2-user@$EC2_HOST" bash -s -- "$CI_COMMIT_SHA" < scripts/deploy-remote.sh
+  after_script:
+    - rm -f "$HOME/.ssh/graviton_lab" "$HOME/.ssh/known_hosts"

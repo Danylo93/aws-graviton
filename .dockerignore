@@ -1,2 +1,3 @@
-#dapr
-.dapr/bin/
+*
+!bin/
+!bin/server
