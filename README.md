@@ -38,12 +38,13 @@ Observe `go test`, `file bin/server` e `docker image inspect graviton-lab:local 
 
 ## Fase 2: pipeline GitLab
 
+Workflow mínimo com três jobs: teste + compilação → imagem → deploy manual. O arquivo `.gitlab-ci.yml` deve ficar na raiz do projeto GitLab.
+
 Crie um projeto privado GitLab e envie esta pasta como repositório. Merge requests e commits em `master` executam teste, `go vet`, compilação `arm64` e build da imagem OCI `arm64`. O build salva um `tar.gz` como **artifact do GitLab por 1 dia**; não usa registry pago. Apenas push na branch `master` oferece `deploy_aws` manual. MR não faz deploy. A etapa de imagem exige runner compartilhado compatível com Docker-in-Docker; se sua instância GitLab não permitir, use um runner próprio Docker com `privileged` habilitado apenas para jobs de build de projeto confiável.
 
 | Job | O que comprova | Saída |
 | --- | --- | --- |
-| `unit_test` | Respostas e health endpoint, análise estática Go | aprovação/falha |
-| `compile_arm64` | Binário ELF para AArch64 (e_machine 183) | `bin/server` |
+| `test_compile_arm64` | Testes, análise estática Go e binário ELF AArch64 | `bin/server` |
 | `build_arm64_image` | Imagem OCI `linux/arm64` | artifact `tar.gz` |
 | `deploy_aws` | Instala imagem na T4g e verifica `/health` | serviço ou rollback |
 
