@@ -1,22 +1,16 @@
-stages: [test, compile, image, deploy]
+stages: [compile, image, deploy]
 
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "master"'
 
-unit_test:
-  stage: test
+test_compile_arm64:
+  stage: compile
   image: golang:1.22-alpine
   script:
     - go test ./...
     - go vet ./...
-
-compile_arm64:
-  stage: compile
-  image: golang:1.22-alpine
-  needs: [unit_test]
-  script:
     - mkdir -p bin
     - CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o bin/server ./app
     - test "$(od -An -tx1 -j 18 -N 2 bin/server | tr -d ' \n')" = b700 # ELF e_machine 183 (AArch64)
@@ -34,7 +28,7 @@ build_arm64_image:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
   needs:
-    - job: compile_arm64
+    - job: test_compile_arm64
       artifacts: true
   script:
     - docker info
